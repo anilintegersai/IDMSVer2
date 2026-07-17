@@ -23,6 +23,7 @@ from app.db.database import get_db
 from app.dependencies import (
     extract_project_name,
     get_audit_service,
+    get_content_service,
     get_coversheet_service,
     get_fields_service,
     get_image_service,
@@ -40,8 +41,11 @@ from app.models.schemas import (
     DeleteSectionRequest,
     DocumentListItem,
     DocumentPathRequest,
+    InsertContentRequest,
+    InsertContentResult,
     InsertParagraphRequest,
     InsertSectionRequest,
+    InsertSectionResult,
     InsertedMarkerInfo,
     InsertedMarkersRequest,
     InsertedTextRequest,
@@ -366,11 +370,13 @@ def insert_formatted_paragraph(
 
 @router.post(
     "/sections",
-    response_model=ApiResponse[bool],
+    response_model=ApiResponse[InsertSectionResult],
     summary="Insert a new document section",
     description=(
         "Adds a heading and body content before the specified TOC bookmark. "
-        "Heading level (1-9) controls the outline level in the destination document."
+        "Heading level (1-9) controls the outline level in the destination document. "
+        "Set `save_as_copy` to write the change to a new copy (named `copy_name`) in the "
+        "source folder, leaving the original untouched."
     ),
 )
 def insert_section(
@@ -381,8 +387,28 @@ def insert_section(
     audit_svc=Depends(get_audit_service),
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
-) -> ApiResponse[bool]:
+) -> ApiResponse[InsertSectionResult]:
     _log_payload(settings, payload_svc, db, "/documents/sections", extract_project_name(body.document_path), body.model_dump(), user_id)
+
+    # Resolve where the edit is written. A copy protects the original: it is
+    # saved beside the source and its name must not collide with an existing
+    # file (so we can never overwrite an original or a previous copy).
+    if body.save_as_copy:
+        name = os.path.basename((body.copy_name or "").strip())
+        if not name:
+            return _ok(None, "Please provide a name for the copy.", "section_copy_name_required", success=False)
+        if not name.lower().endswith(".docx"):
+            name += ".docx"
+        output_path = os.path.join(os.path.dirname(os.path.abspath(body.document_path)), name)
+        if os.path.normpath(output_path) == os.path.normpath(body.document_path):
+            return _ok(None, "The copy name matches the original. Choose a different name.", "section_copy_name_conflict", success=False)
+        if os.path.exists(output_path):
+            return _ok(None, f"A file named '{name}' already exists. Choose a different name.", "section_copy_exists", success=False)
+        created_copy = True
+    else:
+        output_path = body.document_path
+        created_copy = False
+
     ok = svc.insert_section(
         SectionSvcRequest(
             document_path=body.document_path,
@@ -393,12 +419,91 @@ def insert_section(
             highlight=body.highlight,
             is_html=body.is_html,
             track_in_history=body.track_in_history,
+            output_path=output_path if created_copy else None,
         )
     )
     if ok:
-        audit_svc.create(db, user_id, f"Section inserted in {body.document_path}")
-        return _ok(True, "Section inserted.", "section_insert_success")
-    return _ok(False, "Section insert failed.", "section_insert_failed", success=False)
+        where = f"copy {output_path}" if created_copy else body.document_path
+        audit_svc.create(db, user_id, f"Section inserted in {where}")
+        message = (
+            "Section inserted into a new copy - the original is unchanged."
+            if created_copy else "Section inserted."
+        )
+        return _ok(
+            InsertSectionResult(output_path=output_path, created_copy=created_copy),
+            message,
+            "section_insert_success",
+        )
+    return _ok(None, "Section insert failed.", "section_insert_failed", success=False)
+
+
+@router.post(
+    "/content",
+    response_model=ApiResponse[InsertContentResult],
+    summary="Insert content at the end of a section",
+    description=(
+        "Inserts HTML content and/or an image at the end of a section's content, "
+        "before the next heading. The content is appended after all existing content "
+        "of the specified section. Set `save_as_copy` to write the change to a new copy "
+        "(named `copy_name`) in the source folder, leaving the original untouched."
+    ),
+)
+def insert_content(
+    body: InsertContentRequest,
+    svc=Depends(get_content_service),
+    settings: Settings = Depends(get_settings),
+    payload_svc=Depends(get_payload_service),
+    audit_svc=Depends(get_audit_service),
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_optional_user_id),
+) -> ApiResponse[InsertContentResult]:
+    _log_payload(settings, payload_svc, db, "/documents/content", extract_project_name(body.document_path), body.model_dump(), user_id)
+
+    # Resolve where the edit is written
+    if body.save_as_copy:
+        name = os.path.basename((body.copy_name or "").strip())
+        if not name:
+            return _ok(None, "Please provide a name for the copy.", "content_copy_name_required", success=False)
+        if not name.lower().endswith(".docx"):
+            name += ".docx"
+        output_path = os.path.join(os.path.dirname(os.path.abspath(body.document_path)), name)
+        if os.path.normpath(output_path) == os.path.normpath(body.document_path):
+            return _ok(None, "The copy name matches the original. Choose a different name.", "content_copy_name_conflict", success=False)
+        if os.path.exists(output_path):
+            return _ok(None, f"A file named '{name}' already exists. Choose a different name.", "content_copy_exists", success=False)
+        created_copy = True
+    else:
+        output_path = body.document_path
+        created_copy = False
+
+    try:
+        from app.services.word.content import InsertContentRequest as ContentSvcRequest
+        actual_output_path, actual_created_copy = svc.insert_content(
+            ContentSvcRequest(
+                document_path=body.document_path,
+                section_bookmark=body.section_bookmark,
+                html_content=body.html_content,
+                image_data=body.image_data,
+                image_caption=body.image_caption,
+                highlight=body.highlight,
+                save_as_copy=body.save_as_copy,
+                copy_name=body.copy_name,
+                track_in_history=body.track_in_history,
+            )
+        )
+        where = f"copy {actual_output_path}" if actual_created_copy else body.document_path
+        audit_svc.create(db, user_id, f"Content inserted in {where}")
+        message = (
+            "Content inserted into a new copy - the original is unchanged."
+            if actual_created_copy else "Content inserted."
+        )
+        return _ok(
+            InsertContentResult(output_path=actual_output_path, created_copy=actual_created_copy),
+            message,
+            "content_insert_success",
+        )
+    except Exception as e:
+        return _ok(None, f"Content insert failed: {str(e)}", "content_insert_failed", success=False)
 
 
 @router.post(
