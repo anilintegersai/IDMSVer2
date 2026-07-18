@@ -23,6 +23,8 @@ class InsertContentRequest:
     html_content: str = ""
     image_data: str | None = None
     image_caption: str | None = None
+    image_width: float | None = None
+    image_height: float | None = None
     highlight: bool = False
     save_as_copy: bool = False
     copy_name: str | None = None
@@ -107,7 +109,10 @@ class ContentService:
             
             # Add image if provided
             if request.image_data:
-                image_result = self._create_image_paragraph(pkg, request.image_data, request.image_caption, shade)
+                image_result = self._create_image_paragraph(
+                    pkg, request.image_data, request.image_caption, shade,
+                    request.image_width, request.image_height
+                )
                 # _create_image_paragraph returns a list when there's a caption, otherwise a single element
                 if isinstance(image_result, list):
                     to_insert.extend(image_result)
@@ -138,7 +143,9 @@ class ContentService:
         pkg: DocxPackage, 
         image_data: str, 
         caption: str | None, 
-        shade: str | None
+        shade: str | None,
+        width_inches: float | None = None,
+        height_inches: float | None = None
     ) -> etree._Element | list:
         """Create a paragraph containing an image with optional caption."""
         # Parse base64 data URL
@@ -156,15 +163,15 @@ class ContentService:
         # Add image to document
         part_path, rel_id = pkg.add_media_part(ext, image_bytes)
         
-        # Fixed dimensions (5 inches wide, 3.75 inches tall)
-        width_emu = 4572000
-        height_emu = 3429000
+        # Use provided dimensions or defaults (5 inches wide, 3.75 inches tall)
+        EMU_PER_INCH = 914400
+        width_emu = int((width_inches or 5) * EMU_PER_INCH)
+        height_emu = int((height_inches or 3.75) * EMU_PER_INCH)
         
         # Create paragraph with image using the working structure from image.py
         para = etree.Element(w_tag("p"))
-        if shade:
-            from app.services.word.paragraph import _shading_properties
-            para.append(_shading_properties(shade))
+        # Don't add shading to image paragraph - only to caption
+        # This matches the working image service behavior
         
         run = etree.SubElement(para, w_tag("r"))
         drawing = etree.SubElement(run, w_tag("drawing"))

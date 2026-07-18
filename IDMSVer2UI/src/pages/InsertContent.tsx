@@ -47,6 +47,8 @@ export default function InsertContent() {
   const [htmlContent, setHtmlContent] = useState("");
   const [imageData, setImageData] = useState<string | null>(null);
   const [imageCaption, setImageCaption] = useState("");
+  const [imageWidth, setImageWidth] = useState<number>(5);
+  const [imageHeight, setImageHeight] = useState<number>(3.75);
   const [highlight, setHighlight] = useState(false);
   const [inserting, setInserting] = useState(false);
 
@@ -148,6 +150,8 @@ export default function InsertContent() {
         html_content: htmlContent,
         image_data: imageData,
         image_caption: imageCaption || null,
+        image_width: imageData ? imageWidth : null,
+        image_height: imageData ? imageHeight : null,
         highlight,
         save_as_copy: saveAsCopy,
         copy_name: saveAsCopy ? copyName.trim() : null,
@@ -337,16 +341,42 @@ export default function InsertContent() {
               </div>
 
               {imageData && (
-                <div className="form-group">
-                  <label>Image Caption</label>
-                  <input
-                    type="text"
-                    value={imageCaption}
-                    onChange={(e) => setImageCaption(e.target.value)}
-                    placeholder="Figure: Description"
-                    className="form-input"
-                  />
-                </div>
+                <>
+                  <div className="form-group">
+                    <label>Image Caption</label>
+                    <input
+                      type="text"
+                      value={imageCaption}
+                      onChange={(e) => setImageCaption(e.target.value)}
+                      placeholder="Figure: Description"
+                      className="form-input"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Image Width (inches)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.5"
+                      max="10"
+                      value={imageWidth}
+                      onChange={(e) => setImageWidth(parseFloat(e.target.value) || 5)}
+                      className="form-input"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Image Height (inches)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.5"
+                      max="10"
+                      value={imageHeight}
+                      onChange={(e) => setImageHeight(parseFloat(e.target.value) || 3.75)}
+                      className="form-input"
+                    />
+                  </div>
+                </>
               )}
 
               <div className="form-group">

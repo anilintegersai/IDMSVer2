@@ -222,7 +222,7 @@ class InsertSectionRequest(BaseModel):
     """Insert a new heading and body content before a TOC bookmark."""
 
     document_path: str = Field(..., description="Target .docx file path.")
-    insert_before_bookmark: str = Field(..., description="TOC bookmark before which the section is added.")
+    insert_before_bookmark: str | None = Field(default=None, description="TOC bookmark before which the section is added.")
     title: str = Field(..., description="Heading text for the new section.")
     content: str = Field(..., description="Body text or HTML content below the heading.")
     level: int = Field(
@@ -236,7 +236,75 @@ class InsertSectionRequest(BaseModel):
         default=False,
         description="Parse `content` as HTML (supports p, b, i, br, div, li tags).",
     )
+    save_as_copy: bool = Field(
+        default=False,
+        description="When true, the change is written to a NEW copy (named `copy_name`) in the "
+        "source folder and the original document is left untouched. When false, the original is "
+        "edited in place.",
+    )
+    copy_name: str | None = Field(
+        default=None,
+        description="File name for the copy (required when `save_as_copy` is true). `.docx` is "
+        "appended if missing; any path components are stripped so the copy stays in the source folder.",
+    )
     track_in_history: bool = Field(default=False, description="Reserved for revision-history integration.")
+
+
+class InsertSectionResult(BaseModel):
+    """Result of an insert-section operation."""
+
+    output_path: str = Field(description="Path to the document that was written (the copy, or the original when edited in place).")
+    created_copy: bool = Field(default=False, description="True when the change was written to a new copy, leaving the original unchanged.")
+
+
+class InsertContentRequest(BaseModel):
+    """Insert HTML content and images at the end of a section (before the next heading)."""
+
+    document_path: str = Field(..., description="Target .docx file path.")
+    section_bookmark: str = Field(
+        ...,
+        description="TOC bookmark of the section where content should be appended (at the end of the section's content, before the next heading).",
+    )
+    html_content: str = Field(
+        default="",
+        description="HTML content to insert (supports p, b, i, br, div, li, img tags).",
+    )
+    image_data: str | None = Field(
+        default=None,
+        description="Base64-encoded image data (with data URL prefix like 'data:image/png;base64,...').",
+    )
+    image_caption: str | None = Field(
+        default=None,
+        description="Caption text for the image (if image_data is provided).",
+    )
+    image_width: float | None = Field(
+        default=None,
+        description="Image width in inches (if image_data is provided). Default is 5 inches.",
+    )
+    image_height: float | None = Field(
+        default=None,
+        description="Image height in inches (if image_data is provided). Default is 3.75 inches.",
+    )
+    highlight: bool = Field(default=False, description="Apply highlight shading to inserted content.")
+    save_as_copy: bool = Field(
+        default=False,
+        description="When true, the change is written to a NEW copy (named `copy_name`) in the "
+        "source folder and the original document is left untouched. When false, the original is "
+        "edited in place.",
+    )
+    copy_name: str | None = Field(
+        default=None,
+        description="File name for the copy (required when `save_as_copy` is true). `.docx` is "
+        "appended if missing; any path components are stripped so the copy stays in the source folder.",
+    )
+    track_in_history: bool = Field(default=False, description="Reserved for revision-history integration.")
+
+
+class InsertContentResult(BaseModel):
+    """Result of an insert-content operation."""
+
+    output_path: str = Field(description="Path to the document that was written (the copy, or the original when edited in place).")
+    created_copy: bool = Field(default=False, description="True when the change was written to a new copy, leaving the original unchanged.")
 
 
 class DeleteSectionRequest(BaseModel):

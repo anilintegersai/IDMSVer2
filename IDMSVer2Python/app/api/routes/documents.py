@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
+from app.dependencies import validate_document_path
 from app.core.exceptions import DocumentProcessingError
 from app.db.database import get_db
 from app.dependencies import (
@@ -113,7 +114,9 @@ def _toc_node_to_item(node: dict) -> TocItem:
 )
 def get_table_of_contents(body: DocumentPathRequest) -> ApiResponse[list[TocItem]]:
     """Return the document's table of contents as a hierarchical tree."""
-    pkg = DocxPackage(body.document_path, writable=False)
+    # Validate the document path is inside allowed roots before opening
+    norm_path = validate_document_path(body.document_path, get_settings())
+    pkg = DocxPackage(norm_path, writable=False)
     items = [_toc_node_to_item(node) for node in bookmarks.get_toc_tree(pkg)]
     if items:
         return _ok(items, "TOC found.", "toc_success")
@@ -163,13 +166,18 @@ def merge_section(
 ) -> ApiResponse[MergeDocumentResult]:
     merged_dir = settings.merged_base_path
     os.makedirs(merged_dir, exist_ok=True)
+
+    # Validate the master and source paths before proceeding
+    master_path = validate_document_path(body.master_template_path, settings)
+    source_path = validate_document_path(body.source_document_path, settings)
+
     if body.output_filename and body.output_filename.strip():
         # basename() strips any path components — the name must stay inside merged_dir.
         filename = os.path.basename(body.output_filename.strip())
     else:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        master_stem = Path(body.master_template_path).stem
-        source_stem = Path(body.source_document_path).stem
+        master_stem = Path(master_path).stem
+        source_stem = Path(source_path).stem
         filename = f"{master_stem}__with__{source_stem}__{stamp}.docx"
     if not filename.lower().endswith(".docx"):
         filename += ".docx"
@@ -177,9 +185,9 @@ def merge_section(
 
     result = merge_svc.merge_section_outline(
         MergeOutlineRequest(
-            master_template_path=body.master_template_path,
+            master_template_path=master_path,
             output_path=output_path,
-            source_document_path=body.source_document_path,
+            source_document_path=source_path,
             source_start_bookmark=body.source_start_bookmark,
             source_stop_bookmark=body.source_stop_bookmark,
             insert_before_bookmark=body.insert_before_bookmark,
@@ -242,7 +250,8 @@ def download_document(
     ),
 )
 def get_placeholders(body: DocumentPathRequest) -> ApiResponse[list[str]]:
-    found = placeholders.find_placeholders(body.document_path)
+    norm_path = validate_document_path(body.document_path, get_settings())
+    found = placeholders.find_placeholders(norm_path)
     if found:
         return _ok(found, "Placeholders fetched successfully.", "placeholders_success")
     return _ok([], "No placeholders found.", "placeholders_empty", success=False)
@@ -263,15 +272,20 @@ def get_placeholders(body: DocumentPathRequest) -> ApiResponse[list[str]]:
 def merge_document(
     body: MergeDocumentRequest,
     merge_svc=Depends(get_merge_service),
+    settings: Settings = Depends(get_settings),
     audit_svc=Depends(get_audit_service),
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
 ) -> ApiResponse[MergeDocumentResult]:
+    # Validate paths
+    master_path = validate_document_path(body.master_template_path, settings)
+    source_path = validate_document_path(body.source.source_document_path, settings)
+
     result = merge_svc.merge_section(
         MergeSectionRequest(
-            master_template_path=body.master_template_path,
+            master_template_path=master_path,
             output_path=body.output_path,
-            source_document_path=body.source.source_document_path,
+            source_document_path=source_path,
             source_start_bookmark=body.source.start_bookmark,
             source_stop_bookmark=body.source.stop_bookmark,
             insert_before_bookmark=body.insert_before_bookmark,
@@ -318,10 +332,12 @@ def insert_paragraph(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
 ) -> ApiResponse[bool]:
-    _log_payload(settings, payload_svc, db, "/documents/paragraphs", extract_project_name(body.document_path), body.model_dump(), user_id)
+    # Validate path before processing and payload logging
+    norm_path = validate_document_path(body.document_path, settings)
+    _log_payload(settings, payload_svc, db, "/documents/paragraphs", extract_project_name(norm_path), body.model_dump(), user_id)
     ok = svc.insert_plain(
         ParagraphSvcRequest(
-            document_path=body.document_path,
+            document_path=norm_path,
             insert_before_bookmark=body.insert_before_bookmark,
             text=body.text,
             highlight=body.highlight,
@@ -352,10 +368,11 @@ def insert_formatted_paragraph(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
 ) -> ApiResponse[bool]:
-    _log_payload(settings, payload_svc, db, "/documents/paragraphs/formatted", extract_project_name(body.document_path), body.model_dump(), user_id)
+    norm_path = validate_document_path(body.document_path, settings)
+    _log_payload(settings, payload_svc, db, "/documents/paragraphs/formatted", extract_project_name(norm_path), body.model_dump(), user_id)
     ok = svc.insert_formatted(
         ParagraphSvcRequest(
-            document_path=body.document_path,
+            document_path=norm_path,
             insert_before_bookmark=body.insert_before_bookmark,
             text=body.text,
             highlight=body.highlight,
@@ -388,7 +405,9 @@ def insert_section(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
 ) -> ApiResponse[InsertSectionResult]:
-    _log_payload(settings, payload_svc, db, "/documents/sections", extract_project_name(body.document_path), body.model_dump(), user_id)
+    # Validate path and log payload
+    norm_path = validate_document_path(body.document_path, settings)
+    _log_payload(settings, payload_svc, db, "/documents/sections", extract_project_name(norm_path), body.model_dump(), user_id)
 
     # Resolve where the edit is written. A copy protects the original: it is
     # saved beside the source and its name must not collide with an existing
@@ -399,19 +418,19 @@ def insert_section(
             return _ok(None, "Please provide a name for the copy.", "section_copy_name_required", success=False)
         if not name.lower().endswith(".docx"):
             name += ".docx"
-        output_path = os.path.join(os.path.dirname(os.path.abspath(body.document_path)), name)
-        if os.path.normpath(output_path) == os.path.normpath(body.document_path):
+        output_path = os.path.join(os.path.dirname(os.path.abspath(norm_path)), name)
+        if os.path.normpath(output_path) == os.path.normpath(norm_path):
             return _ok(None, "The copy name matches the original. Choose a different name.", "section_copy_name_conflict", success=False)
         if os.path.exists(output_path):
             return _ok(None, f"A file named '{name}' already exists. Choose a different name.", "section_copy_exists", success=False)
         created_copy = True
     else:
-        output_path = body.document_path
+        output_path = norm_path
         created_copy = False
 
     ok = svc.insert_section(
         SectionSvcRequest(
-            document_path=body.document_path,
+            document_path=norm_path,
             insert_before_bookmark=body.insert_before_bookmark,
             title=body.title,
             content=body.content,
@@ -423,7 +442,7 @@ def insert_section(
         )
     )
     if ok:
-        where = f"copy {output_path}" if created_copy else body.document_path
+        where = f"copy {output_path}" if created_copy else norm_path
         audit_svc.create(db, user_id, f"Section inserted in {where}")
         message = (
             "Section inserted into a new copy - the original is unchanged."
@@ -457,7 +476,9 @@ def insert_content(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
 ) -> ApiResponse[InsertContentResult]:
-    _log_payload(settings, payload_svc, db, "/documents/content", extract_project_name(body.document_path), body.model_dump(), user_id)
+    # Validate path and log payload
+    norm_path = validate_document_path(body.document_path, settings)
+    _log_payload(settings, payload_svc, db, "/documents/content", extract_project_name(norm_path), body.model_dump(), user_id)
 
     # Resolve where the edit is written
     if body.save_as_copy:
@@ -466,32 +487,34 @@ def insert_content(
             return _ok(None, "Please provide a name for the copy.", "content_copy_name_required", success=False)
         if not name.lower().endswith(".docx"):
             name += ".docx"
-        output_path = os.path.join(os.path.dirname(os.path.abspath(body.document_path)), name)
-        if os.path.normpath(output_path) == os.path.normpath(body.document_path):
+        output_path = os.path.join(os.path.dirname(os.path.abspath(norm_path)), name)
+        if os.path.normpath(output_path) == os.path.normpath(norm_path):
             return _ok(None, "The copy name matches the original. Choose a different name.", "content_copy_name_conflict", success=False)
         if os.path.exists(output_path):
             return _ok(None, f"A file named '{name}' already exists. Choose a different name.", "content_copy_exists", success=False)
         created_copy = True
     else:
-        output_path = body.document_path
+        output_path = norm_path
         created_copy = False
 
     try:
         from app.services.word.content import InsertContentRequest as ContentSvcRequest
         actual_output_path, actual_created_copy = svc.insert_content(
             ContentSvcRequest(
-                document_path=body.document_path,
+                document_path=norm_path,
                 section_bookmark=body.section_bookmark,
                 html_content=body.html_content,
                 image_data=body.image_data,
                 image_caption=body.image_caption,
+                image_width=body.image_width,
+                image_height=body.image_height,
                 highlight=body.highlight,
                 save_as_copy=body.save_as_copy,
                 copy_name=body.copy_name,
                 track_in_history=body.track_in_history,
             )
         )
-        where = f"copy {actual_output_path}" if actual_created_copy else body.document_path
+        where = f"copy {actual_output_path}" if actual_created_copy else norm_path
         audit_svc.create(db, user_id, f"Content inserted in {where}")
         message = (
             "Content inserted into a new copy - the original is unchanged."
@@ -524,16 +547,18 @@ def delete_sections(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
 ) -> ApiResponse[bool]:
-    _log_payload(settings, payload_svc, db, "/documents/sections/delete", extract_project_name(body.document_path), body.model_dump(), user_id)
+    # Validate path and log payload
+    norm_path = validate_document_path(body.document_path, settings)
+    _log_payload(settings, payload_svc, db, "/documents/sections/delete", extract_project_name(norm_path), body.model_dump(), user_id)
     ok = svc.delete_sections(
         DeleteSvcRequest(
-            document_path=body.document_path,
+            document_path=norm_path,
             toc_bookmarks=body.sections,
             track_in_history=body.track_in_history,
         )
     )
     if ok:
-        audit_svc.create(db, user_id, f"Sections deleted in {body.document_path}")
+        audit_svc.create(db, user_id, f"Sections deleted in {norm_path}")
         return _ok(True, "Sections removed.", "section_delete_success")
     return _ok(False, "Section delete failed.", "section_delete_failed", success=False)
 
@@ -564,19 +589,26 @@ async def insert_image(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
 ) -> ApiResponse[bool]:
+    # Validate path and enforce upload size limit
+    norm_path = validate_document_path(document_path, settings)
     image_bytes = await file.read()
+    # Basic upload size protection (reject > 10MB by default)
+    max_size = getattr(settings, 'max_upload_size_bytes', 10 * 1024 * 1024)
+    if len(image_bytes) > max_size:
+        raise HTTPException(status_code=413, detail="Uploaded image exceeds maximum allowed size")
+
     _log_payload(
         settings,
         payload_svc,
         db,
         "/documents/images",
-        extract_project_name(document_path),
-        {"document_path": document_path, "insert_before_bookmark": insert_before_bookmark, "filename": file.filename},
+        extract_project_name(norm_path),
+        {"document_path": norm_path, "insert_before_bookmark": insert_before_bookmark, "filename": file.filename},
         user_id,
     )
     ok = svc.insert_image(
         InsertImageRequest(
-            document_path=document_path,
+            document_path=norm_path,
             insert_before_bookmark=insert_before_bookmark,
             image_bytes=image_bytes,
             filename=file.filename or "image.png",
@@ -589,7 +621,7 @@ async def insert_image(
         )
     )
     if ok:
-        audit_svc.create(db, user_id, f"Image inserted in {document_path}")
+        audit_svc.create(db, user_id, f"Image inserted in {norm_path}")
         return _ok(True, "Image inserted.", "image_insert_success")
     return _ok(False, "Image insert failed.", "image_insert_failed", success=False)
 
@@ -635,9 +667,10 @@ def update_fields(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
 ) -> ApiResponse[bool]:
-    ok = svc.update_captions(body.document_path)
+    norm_path = validate_document_path(body.document_path, settings)
+    ok = svc.update_captions(norm_path)
     if ok:
-        audit_svc.create(db, user_id, f"Fields updated for {body.document_path}")
+        audit_svc.create(db, user_id, f"Fields updated for {norm_path}")
         return _ok(True, "Fields marked for update.", "fields_update_success")
     return _ok(True, "No fields required updating.", "fields_update_noop")
 
@@ -657,10 +690,11 @@ def update_toc(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
 ) -> ApiResponse[bool]:
-    with DocxPackage(body.document_path).edit_copy() as pkg:
+    norm_path = validate_document_path(body.document_path, get_settings())
+    with DocxPackage(norm_path).edit_copy() as pkg:
         changed = toc.update_toc(pkg)
     if changed:
-        audit_svc.create(db, user_id, f"TOC updated for {body.document_path}")
+        audit_svc.create(db, user_id, f"TOC updated for {norm_path}")
         return _ok(True, "TOC marked for refresh.", "toc_update_success")
     return _ok(True, "TOC update not required.", "toc_update_noop")
 
@@ -688,13 +722,19 @@ async def replace_document(
     audit_svc=Depends(get_audit_service),
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
+    settings: Settings = Depends(get_settings),
 ) -> ApiResponse[bool]:
     rules_data = json.loads(identifying_rules_json)
     rules = [ReplaceRule(row=r["row"], col=r["col"], value=r["value"]) for r in rules_data]
+    # Validate the existing document path and enforce upload limits
+    norm_old_path = validate_document_path(old_document_path, settings)
     content = await new_document.read()
-    ok = svc.compare_and_replace(content, old_document_path, rules)
+    max_size = getattr(settings, 'max_upload_size_bytes', 10 * 1024 * 1024)
+    if len(content) > max_size:
+        raise HTTPException(status_code=413, detail="Uploaded document exceeds maximum allowed size")
+    ok = svc.compare_and_replace(content, norm_old_path, rules)
     if ok:
-        audit_svc.create(db, user_id, f"Document replaced: {old_document_path}")
+        audit_svc.create(db, user_id, f"Document replaced: {norm_old_path}")
         return _ok(True, "Document replaced successfully.", "replace_success")
     return _ok(False, "Replace failed — table or content mismatch.", "replace_failed", success=False)
 
@@ -708,10 +748,11 @@ async def replace_document(
         "Use these IDs with the content and update endpoints."
     ),
 )
-def get_inserted_markers(body: InsertedMarkersRequest, svc=Depends(get_inserted_text_service)) -> ApiResponse[list[InsertedMarkerInfo]]:
+def get_inserted_markers(body: InsertedMarkersRequest, svc=Depends(get_inserted_text_service), settings: Settings = Depends(get_settings)) -> ApiResponse[list[InsertedMarkerInfo]]:
+    norm_path = validate_document_path(body.document_path, settings)
     markers = [
         InsertedMarkerInfo(logical_id=m["logical_id"], section_number=m["section_number"])
-        for m in svc.get_markers(body.document_path, body.section_number)
+        for m in svc.get_markers(norm_path, body.section_number)
     ]
     if markers:
         return _ok(markers, "Markers found.", "markers_success")
@@ -724,8 +765,9 @@ def get_inserted_markers(body: InsertedMarkersRequest, svc=Depends(get_inserted_
     summary="Get text content for an inserted marker",
     description="Retrieves the plain text between the start and end bookmarks for a logical marker ID.",
 )
-def get_inserted_text(body: InsertedTextRequest, svc=Depends(get_inserted_text_service)) -> ApiResponse[str]:
-    content = svc.get_content(body.document_path, body.logical_id)
+def get_inserted_text(body: InsertedTextRequest, svc=Depends(get_inserted_text_service), settings: Settings = Depends(get_settings)) -> ApiResponse[str]:
+    norm_path = validate_document_path(body.document_path, settings)
+    content = svc.get_content(norm_path, body.logical_id)
     if content is None:
         return _ok("", "Marker not found.", "inserted_text_not_found", success=False)
     return _ok(content, "Content retrieved.", "inserted_text_success")
@@ -746,10 +788,12 @@ def update_inserted_text(
     audit_svc=Depends(get_audit_service),
     db: Session = Depends(get_db),
     user_id: int = Depends(get_optional_user_id),
+    settings: Settings = Depends(get_settings),
 ) -> ApiResponse[bool]:
+    norm_path = validate_document_path(body.document_path, settings)
     ok = svc.update_content(
         UpdateSvcRequest(
-            document_path=body.document_path,
+            document_path=norm_path,
             logical_id=body.logical_id,
             text=body.text,
             highlight=body.highlight,
@@ -760,7 +804,7 @@ def update_inserted_text(
         audit_svc.create(
             db,
             user_id,
-            f"Inserted text {body.logical_id} updated in {body.document_path}",
+            f"Inserted text {body.logical_id} updated in {norm_path}",
         )
         return _ok(True, "Inserted text updated.", "inserted_text_update_success")
     return _ok(False, "Update failed — marker not found.", "inserted_text_update_failed", success=False)
@@ -775,8 +819,9 @@ def update_inserted_text(
         "merged content available for editing."
     ),
 )
-def get_editable_sections(body: DocumentPathRequest, svc=Depends(get_inserted_text_service)) -> ApiResponse[list[TocItem]]:
-    sections = [TocItem(**row) for row in svc.get_editable_sections(body.document_path)]
+def get_editable_sections(body: DocumentPathRequest, svc=Depends(get_inserted_text_service), settings: Settings = Depends(get_settings)) -> ApiResponse[list[TocItem]]:
+    norm_path = validate_document_path(body.document_path, settings)
+    sections = [TocItem(**row) for row in svc.get_editable_sections(norm_path)]
     if sections:
         return _ok(sections, "Editable sections found.", "editable_sections_success")
     return _ok([], "No editable sections found.", "editable_sections_empty", success=False)

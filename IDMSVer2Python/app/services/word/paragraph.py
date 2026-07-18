@@ -73,9 +73,41 @@ def _html_to_paragraphs(html: str, shade: str | None) -> list[etree._Element]:
                     _append_run(para, text)
             elif isinstance(node, Tag):
                 if node.name in ("b", "strong"):
-                    _append_run(para, node.get_text(), bold=True)
+                    # Create a new run with bold formatting
+                    run = etree.SubElement(para, w_tag("r"))
+                    rpr = etree.SubElement(run, w_tag("rPr"))
+                    etree.SubElement(rpr, w_tag("b"))
+                    # Process children and add text to this run
+                    for child in node.children:
+                        if isinstance(child, str) and child.strip():
+                            t = etree.SubElement(run, w_tag("t"))
+                            t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                            t.text = child
+                        elif hasattr(child, 'name') and child.name is not None:
+                            # Nested tags inside bold - process recursively
+                            for subchild in child.children:
+                                if isinstance(subchild, str) and subchild.strip():
+                                    t = etree.SubElement(run, w_tag("t"))
+                                    t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                                    t.text = subchild
                 elif node.name in ("i", "em"):
-                    _append_run(para, node.get_text(), italic=True)
+                    # Create a new run with italic formatting
+                    run = etree.SubElement(para, w_tag("r"))
+                    rpr = etree.SubElement(run, w_tag("rPr"))
+                    etree.SubElement(rpr, w_tag("i"))
+                    # Process children and add text to this run
+                    for child in node.children:
+                        if isinstance(child, str) and child.strip():
+                            t = etree.SubElement(run, w_tag("t"))
+                            t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                            t.text = child
+                        elif hasattr(child, 'name') and child.name is not None:
+                            # Nested tags inside italic - process recursively
+                            for subchild in child.children:
+                                if isinstance(subchild, str) and subchild.strip():
+                                    t = etree.SubElement(run, w_tag("t"))
+                                    t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                                    t.text = subchild
                 elif node.name == "br":
                     _append_run(para, "\n")
                 else:
@@ -88,12 +120,71 @@ def _html_to_paragraphs(html: str, shade: str | None) -> list[etree._Element]:
             _append_run(para, tag.get_text())
         return para
 
-    blocks = soup.find_all(["p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6"])
-    if blocks:
-        for block in blocks:
-            paragraphs.append(handle_block(block))
-    else:
-        paragraphs.append(_text_paragraph(soup.get_text(), shade))
+    # Process all children of the soup to handle mixed content correctly
+    for child in soup.children:
+        if hasattr(child, 'name') and child.name in ["p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6"]:
+            # Block element - process it directly
+            paragraphs.append(handle_block(child))
+        elif isinstance(child, str) and child.strip():
+            # Text node at root level - create a paragraph for it
+            para = etree.Element(w_tag("p"))
+            if shade:
+                para.append(_shading_properties(shade))
+            _append_run(para, child.strip())
+            paragraphs.append(para)
+        elif hasattr(child, 'name') and child.name is not None:
+            # Inline element at root level (b, i, etc.) - wrap in a paragraph
+            para = etree.Element(w_tag("p"))
+            if shade:
+                para.append(_shading_properties(shade))
+            # Walk the inline element directly
+            def walk_inline(node):
+                if isinstance(node, str):
+                    if node.strip():
+                        _append_run(para, node.strip())
+                elif hasattr(node, 'name') and node.name is not None:
+                    if node.name in ("b", "strong"):
+                        # Create a new run with bold formatting
+                        run = etree.SubElement(para, w_tag("r"))
+                        rpr = etree.SubElement(run, w_tag("rPr"))
+                        etree.SubElement(rpr, w_tag("b"))
+                        # Process children and add text to this run
+                        for c in node.children:
+                            if isinstance(c, str) and c.strip():
+                                t = etree.SubElement(run, w_tag("t"))
+                                t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                                t.text = c
+                            elif hasattr(c, 'name') and c.name is not None:
+                                for subchild in c.children:
+                                    if isinstance(subchild, str) and subchild.strip():
+                                        t = etree.SubElement(run, w_tag("t"))
+                                        t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                                        t.text = subchild
+                    elif node.name in ("i", "em"):
+                        # Create a new run with italic formatting
+                        run = etree.SubElement(para, w_tag("r"))
+                        rpr = etree.SubElement(run, w_tag("rPr"))
+                        etree.SubElement(rpr, w_tag("i"))
+                        # Process children and add text to this run
+                        for c in node.children:
+                            if isinstance(c, str) and c.strip():
+                                t = etree.SubElement(run, w_tag("t"))
+                                t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                                t.text = c
+                            elif hasattr(c, 'name') and c.name is not None:
+                                for subchild in c.children:
+                                    if isinstance(subchild, str) and subchild.strip():
+                                        t = etree.SubElement(run, w_tag("t"))
+                                        t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                                        t.text = subchild
+                    elif node.name == "br":
+                        _append_run(para, "\n")
+                    else:
+                        for c in node.children:
+                            walk_inline(c)
+            walk_inline(child)
+            paragraphs.append(para)
+    
     return paragraphs
 
 

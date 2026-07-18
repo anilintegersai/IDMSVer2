@@ -75,3 +75,58 @@ export async function fetchDocxBlob(path: string): Promise<Blob> {
   });
   return data as Blob;
 }
+
+export interface InsertSectionPayload {
+  document_path: string;
+  insert_before_bookmark: string | null;
+  title: string;
+  content: string;
+  level: number;
+  highlight?: boolean;
+  is_html?: boolean;
+  track_in_history?: boolean;
+  /** When true, write to a new copy (copy_name) and leave the original unchanged. */
+  save_as_copy?: boolean;
+  /** File name for the copy (required when save_as_copy is true). */
+  copy_name?: string | null;
+}
+
+export interface InsertSectionResult {
+  output_path: string;
+  created_copy: boolean;
+}
+
+/** Insert a new heading and body content into a document. */
+export async function insertSection(
+  payload: InsertSectionPayload,
+): Promise<ApiResponse<InsertSectionResult>> {
+  const { data } = await http.post<ApiResponse<InsertSectionResult>>("/documents/sections", payload);
+  return data;
+}
+
+export interface InsertContentPayload {
+  document_path: string;
+  section_bookmark: string;
+  html_content: string;
+  image_data?: string | null;
+  image_caption?: string | null;
+  image_width?: number | null;
+  image_height?: number | null;
+  highlight?: boolean;
+  save_as_copy?: boolean;
+  copy_name?: string | null;
+  track_in_history?: boolean;
+}
+
+export interface InsertContentResult {
+  output_path: string;
+  created_copy: boolean;
+}
+
+/** Insert HTML content and/or image at the end of a section. */
+export async function insertContent(
+  payload: InsertContentPayload,
+): Promise<ApiResponse<InsertContentResult>> {
+  const { data } = await http.post<ApiResponse<InsertContentResult>>("/documents/content", payload);
+  return data;
+}
