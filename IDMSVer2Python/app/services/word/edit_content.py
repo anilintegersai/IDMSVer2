@@ -81,90 +81,90 @@ class EditContentService:
 
     def get_editable_sections(self, request: GetEditableSectionsRequest) -> GetEditableSectionsResult:
         """Get all sections that have editable content markers."""
-        with DocxPackage(request.document_path).read() as pkg:
-            body = pkg.body
-            heading_styles = bookmarks.get_heading_style_map(pkg)
+        pkg = DocxPackage(request.document_path, writable=False)
+        body = pkg.body
+        heading_styles = bookmarks.get_heading_style_map(pkg)
+        
+        editable_sections: list[EditableContent] = []
+        
+        # Find all Content_Start bookmarks
+        for bookmark_start in body.findall(f".//w:bookmarkStart[@w:name[starts-with(., 'Content_Start_')]]", namespaces=bookmarks.NS):
+            bookmark_name = bookmark_start.get(f"{{{bookmarks.NS['w']}}}name")
+            logical_id = bookmark_name.replace("Content_Start_", "")
             
-            editable_sections: list[EditableContent] = []
+            # Find the section this content belongs to
+            section_bookmark, section_number, section_title = self._find_section_for_content(body, bookmark_start, heading_styles)
             
-            # Find all Content_Start bookmarks
-            for bookmark_start in body.findall(f".//w:bookmarkStart[@w:name[starts-with(., 'Content_Start_')]]", namespaces=bookmarks.NS):
-                bookmark_name = bookmark_start.get(f"{{{bookmarks.NS['w']}}}name")
-                logical_id = bookmark_name.replace("Content_Start_", "")
+            if section_bookmark:
+                # Get preview text
+                preview = self._get_content_preview(body, logical_id)
                 
-                # Find the section this content belongs to
-                section_bookmark, section_number, section_title = self._find_section_for_content(body, bookmark_start, heading_styles)
-                
-                if section_bookmark:
-                    # Get preview text
-                    preview = self._get_content_preview(body, logical_id)
-                    
-                    editable_sections.append(EditableContent(
-                        logical_id=logical_id,
-                        section_bookmark=section_bookmark,
-                        section_number=section_number,
-                        section_title=section_title,
-                        preview=preview
-                    ))
-            
-            return GetEditableSectionsResult(sections=editable_sections)
+                editable_sections.append(EditableContent(
+                    logical_id=logical_id,
+                    section_bookmark=section_bookmark,
+                    section_number=section_number,
+                    section_title=section_title,
+                    preview=preview
+                ))
+        
+        return GetEditableSectionsResult(sections=editable_sections)
 
     def get_content_markers(self, request: GetContentMarkersRequest) -> GetContentMarkersResult:
         """Get all content markers for a specific section."""
-        with DocxPackage(request.document_path).read() as pkg:
-            body = pkg.body
-            heading_styles = bookmarks.get_heading_style_map(pkg)
+        pkg = DocxPackage(request.document_path, writable=False)
+        body = pkg.body
+        heading_styles = bookmarks.get_heading_style_map(pkg)
+        
+        markers: list[ContentMarker] = []
+        
+        # Find the section paragraph
+        section_para = bookmarks.find_bookmark_paragraph(body, request.section_bookmark)
+        if section_para is None:
+            return GetContentMarkersResult(markers=[])
+        
+        # Find the end of this section (next heading or end of body)
+        next_heading = bookmarks.find_next_heading(body, section_para, heading_styles)
+        
+        # Find all Content_Start bookmarks within this section
+        for bookmark_start in body.findall(f".//w:bookmarkStart[@w:name[starts-with(., 'Content_Start_')]]", namespaces=bookmarks.NS):
+            bookmark_name = bookmark_start.get(f"{{{bookmarks.NS['w']}}}name")
+            logical_id = bookmark_name.replace("Content_Start_", "")
             
-            markers: list[ContentMarker] = []
+            # Check if this bookmark is within the current section
+            bookmark_para = bookmarks.find_bookmark_paragraph(body, bookmark_name)
+            if bookmark_para is None:
+                continue
             
-            # Find the section paragraph
-            section_para = bookmarks.find_bookmark_paragraph(body, request.section_bookmark)
-            if section_para is None:
-                return GetContentMarkersResult(markers=[])
-            
-            # Find the end of this section (next heading or end of body)
-            next_heading = bookmarks.find_next_heading(body, section_para, heading_styles)
-            
-            # Find all Content_Start bookmarks within this section
-            for bookmark_start in body.findall(f".//w:bookmarkStart[@w:name[starts-with(., 'Content_Start_')]]", namespaces=bookmarks.NS):
-                bookmark_name = bookmark_start.get(f"{{{bookmarks.NS['w']}}}name")
-                logical_id = bookmark_name.replace("Content_Start_", "")
-                
-                # Check if this bookmark is within the current section
-                bookmark_para = bookmarks.find_bookmark_paragraph(body, bookmark_name)
-                if bookmark_para is None:
-                    continue
-                
-                # Check if bookmark is between section start and next heading
-                is_in_section = bookmarks.is_element_between(bookmark_para, section_para, next_heading)
-                if is_in_section:
-                    preview = self._get_content_preview(body, logical_id)
-                    if preview:  # Only add if there's actual content
-                        markers.append(ContentMarker(logical_id=logical_id, preview=preview))
-            
-            return GetContentMarkersResult(markers=markers)
+            # Check if bookmark is between section start and next heading
+            is_in_section = bookmarks.is_element_between(bookmark_para, section_para, next_heading)
+            if is_in_section:
+                preview = self._get_content_preview(body, logical_id)
+                if preview:  # Only add if there's actual content
+                    markers.append(ContentMarker(logical_id=logical_id, preview=preview))
+        
+        return GetContentMarkersResult(markers=markers)
 
     def get_content_text(self, request: GetContentTextRequest) -> GetContentTextResult:
         """Get the full HTML content between Content_Start and Content_End markers."""
-        with DocxPackage(request.document_path).read() as pkg:
-            body = pkg.body
-            
-            start_name = f"Content_Start_{request.logical_id}"
-            end_name = f"Content_End_{request.logical_id}"
-            
-            start_para = bookmarks.find_bookmark_paragraph(body, start_name)
-            end_para = bookmarks.find_bookmark_paragraph(body, end_name)
-            
-            if start_para is None or end_para is None:
-                return GetContentTextResult(html_content="")
-            
-            # Extract paragraphs between start and end
-            content_paras = bookmarks.get_elements_between(start_para, end_para)
-            
-            # Convert paragraphs to HTML
-            html_content = self._paragraphs_to_html(content_paras)
-            
-            return GetContentTextResult(html_content=html_content)
+        pkg = DocxPackage(request.document_path, writable=False)
+        body = pkg.body
+        
+        start_name = f"Content_Start_{request.logical_id}"
+        end_name = f"Content_End_{request.logical_id}"
+        
+        start_para = bookmarks.find_bookmark_paragraph(body, start_name)
+        end_para = bookmarks.find_bookmark_paragraph(body, end_name)
+        
+        if start_para is None or end_para is None:
+            return GetContentTextResult(html_content="")
+        
+        # Extract paragraphs between start and end
+        content_paras = bookmarks.get_elements_between(start_para, end_para)
+        
+        # Convert paragraphs to HTML
+        html_content = self._paragraphs_to_html(content_paras)
+        
+        return GetContentTextResult(html_content=html_content)
 
     def replace_content_text(self, request: ReplaceContentTextRequest) -> ReplaceContentTextResult:
         """Replace the content between markers with new HTML content."""
@@ -187,7 +187,7 @@ class EditContentService:
             created_copy = False
         
         with DocxPackage(request.document_path).edit_copy(destination=output_path if created_copy else None) as pkg:
-            body = pkg.document
+            body = pkg.body
             
             start_name = f"Content_Start_{request.logical_id}"
             end_name = f"Content_End_{request.logical_id}"
@@ -215,8 +215,6 @@ class EditContentService:
             # Insert new paragraphs before the end bookmark
             for para in reversed(new_paras):
                 bookmarks.insert_elements_before(end_para, [para])
-            
-            pkg.set_xml(DOCUMENT_XML, pkg.document)
         
         return ReplaceContentTextResult(output_path=output_path, created_copy=created_copy)
 
