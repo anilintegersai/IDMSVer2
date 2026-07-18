@@ -55,6 +55,141 @@ def get_body_elements_between_bookmarks(
     return elements
 
 
+def get_elements_between(start: etree._Element, end: etree._Element) -> list[etree._Element]:
+    """Return all elements between start and end (exclusive)."""
+    parent = start.getparent()
+    if parent is None or parent != end.getparent():
+        return []
+    
+    elements: list[etree._Element] = []
+    capturing = False
+    for child in parent:
+        if child is start:
+            capturing = True
+            continue
+        if child is end:
+            break
+        if capturing:
+            elements.append(child)
+    return elements
+
+
+def is_element_between(element: etree._Element, start: etree._Element, end: etree._Element | None) -> bool:
+    """Check if element is between start and end (exclusive)."""
+    if end is None:
+        # If no end, check if element comes after start
+        parent = start.getparent()
+        if parent is None:
+            return False
+        found_start = False
+        for child in parent:
+            if child is start:
+                found_start = True
+            elif found_start and child is element:
+                return True
+        return False
+    
+    parent = start.getparent()
+    if parent is None or parent != element.getparent() or parent != end.getparent():
+        return False
+    
+    found_start = False
+    for child in parent:
+        if child is start:
+            found_start = True
+        elif found_start and child is element:
+            return True
+        elif child is end:
+            break
+    return False
+
+
+def find_bookmark_paragraph_by_element(body: etree._Element, bookmark_start: etree._Element) -> etree._Element | None:
+    """Find the paragraph containing a bookmark start element."""
+    parent = bookmark_start.getparent()
+    while parent is not None and parent.tag != w_tag("body"):
+        if parent.tag == w_tag("p"):
+            return parent
+        parent = parent.getparent()
+    return None
+
+
+def get_bookmark_for_paragraph(body: etree._Element, paragraph: etree._Element) -> str | None:
+    """Get the bookmark name for a paragraph."""
+    for bm in paragraph.iter(w_tag("bookmarkStart")):
+        name = bm.get(w_tag("name"))
+        if name:
+            return name
+    return None
+
+
+def get_element_after_bookmark(body: etree._Element, bookmark_name: str) -> etree._Element | None:
+    """Get the element immediately after the bookmark end."""
+    bookmark_end = body.find(f".//w:bookmarkEnd[@w:name='{bookmark_name}']", namespaces=NSMAP)
+    if bookmark_end is None:
+        return None
+    
+    # Find the next sibling after the bookmark end
+    parent = bookmark_end.getparent()
+    if parent is None:
+        return None
+    
+    index = parent.index(bookmark_end)
+    if index + 1 < len(parent):
+        return parent[index + 1]
+    
+    # If no sibling in parent, look for next paragraph in body
+    para = find_bookmark_paragraph(body, bookmark_name)
+    if para is None:
+        return None
+    
+    parent_body = para.getparent()
+    if parent_body is None:
+        return None
+    
+    para_index = parent_body.index(para)
+    if para_index + 1 < len(parent_body):
+        return parent_body[para_index + 1]
+    
+    return None
+
+
+def find_next_heading(body: etree._Element, start_para: etree._Element, heading_styles: dict[str, int]) -> etree._Element | None:
+    """Find the next heading paragraph after start_para."""
+    parent = start_para.getparent()
+    if parent is None:
+        return None
+    
+    found_start = False
+    for child in parent:
+        if child is start_para:
+            found_start = True
+        elif found_start:
+            if _heading_level(child, heading_styles) is not None:
+                return child
+    return None
+
+
+def find_previous_heading(body: etree._Element, start_para: etree._Element, heading_styles: dict[str, int]) -> etree._Element | None:
+    """Find the previous heading paragraph before start_para."""
+    parent = start_para.getparent()
+    if parent is None:
+        return None
+    
+    previous_heading = None
+    for child in parent:
+        if child is start_para:
+            break
+        if _heading_level(child, heading_styles) is not None:
+            previous_heading = child
+    return previous_heading
+
+
+def get_heading_text(paragraph: etree._Element) -> str:
+    """Get the text content of a heading paragraph."""
+    return paragraph_text(paragraph)
+
+
 def get_next_bookmark_id(body: etree._Element) -> int:
     ids = []
     for bm in body.iter(w_tag("bookmarkStart")):
@@ -86,6 +221,131 @@ def paragraph_text(paragraph: etree._Element) -> str:
             texts.append(node.text)
     return "".join(texts)
 
+
+# ---------------------------------------------------------------------------
+# Heading renumbering after section insertion
+# ---------------------------------------------------------------------------
+
+_SECTION_NUMBER_RE = re.compile(r"^(\d+(?:\.\d+)*)(\s+)(.*)$", re.DOTALL)
+
+
+def _update_heading_number(para: etree._Element, new_number: str) -> bool:
+    """Replace the section-number prefix in a heading paragraph.
+
+    Preserves formatting by only mutating ``<w:t>`` text nodes, never
+    restructuring ``<w:r>`` elements. Returns ``True`` when the heading
+    already carried a section number and was updated."""
+    text_nodes = [n for n in para.iter(w_tag("t")) if n.text]
+    if not text_nodes:
+        return False
+
+    full_text = "".join(t.text or "" for t in text_nodes)
+    m = _SECTION_NUMBER_RE.match(full_text)
+    if not m:
+        return False
+
+    old_num = m.group(1)
+    space = m.group(2)
+    prefix_len = len(old_num) + len(space)
+
+    # Strip the old number+space from the beginning of the text-node sequence.
+    to_remove = prefix_len
+    for node in text_nodes:
+        txt = node.text or ""
+        if len(txt) <= to_remove:
+            node.text = ""
+            to_remove -= len(txt)
+        else:
+            node.text = txt[to_remove:]
+            to_remove = 0
+            break
+
+    # Prepend the new number to the first text node.
+    text_nodes[0].text = new_number + space + (text_nodes[0].text or "")
+    return True
+
+
+def document_has_numbered_headings(
+    body: etree._Element, heading_styles: dict[str, int] | None = None
+) -> bool:
+    """Return ``True`` when at least one heading paragraph starts with a
+    ``1.2.3`` style section number."""
+    for para in body.iter(w_tag("p")):
+        level = _heading_level(para, heading_styles)
+        if level is None:
+            continue
+        text = paragraph_text(para).strip()
+        if _SECTION_NUMBER_RE.match(text):
+            return True
+    return False
+
+
+def renumber_headings_after_insert(
+    body: etree._Element,
+    heading_styles: dict[str, int] | None,
+    inserted_para: etree._Element,
+) -> str | None:
+    """Recalculate section numbers for all headings from *inserted_para*
+    onwards and update their text when they already carry a number.
+
+    Returns the computed section number for the inserted heading, or
+    ``None`` when the document does not use numbered headings."""
+    if not document_has_numbered_headings(body, heading_styles):
+        return None
+
+    counters: list[int] = []
+    found_inserted = False
+    inserted_number: str | None = None
+
+    for para in body.iter(w_tag("p")):
+        level = _heading_level(para, heading_styles)
+        if level is None:
+            continue
+
+        # Advance counters
+        if level <= len(counters):
+            del counters[level:]
+            counters[level - 1] += 1
+        else:
+            while len(counters) < level:
+                counters.append(1)
+
+        current_number = ".".join(str(n) for n in counters)
+
+        if para is inserted_para:
+            found_inserted = True
+            inserted_number = current_number
+            # New heading gets the number unconditionally (it has none yet).
+            _prepend_number_to_heading(para, current_number)
+        elif found_inserted:
+            # Only update existing headings that already have a number.
+            _update_heading_number(para, current_number)
+
+    return inserted_number
+
+
+def _prepend_number_to_heading(para: etree._Element, number: str) -> None:
+    """Prepend ``number`` + space to the first text node of a heading.
+    Safe for newly-created headings that do not yet carry a section number."""
+    for node in para.iter(w_tag("t")):
+        if node.text is not None or node.getparent() is not None:
+            node.text = number + " " + (node.text or "")
+            break
+    else:
+        # No text node found – create one inside the first run.
+        first_run = para.find(w_tag("r"), NSMAP)
+        if first_run is not None:
+            t = etree.SubElement(first_run, w_tag("t"))
+            t.text = number + " "
+        else:
+            run = etree.SubElement(para, w_tag("r"))
+            t = etree.SubElement(run, w_tag("t"))
+            t.text = number + " "
+
+
+# ---------------------------------------------------------------------------
+# TOC helpers
+# ---------------------------------------------------------------------------
 
 def is_toc_entry(paragraph: etree._Element) -> bool:
     ppr = paragraph.find("w:pPr", NSMAP)

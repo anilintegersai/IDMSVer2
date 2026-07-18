@@ -10,7 +10,7 @@ from lxml import etree
 from app.config import Settings
 from app.core.exceptions import BookmarkNotFoundError
 from app.core.namespaces import w_tag
-from app.services.word import bookmarks, metadata, numbering
+from app.services.word import bookmarks, metadata, numbering, toc
 from app.services.word.document_package import DOCUMENT_XML, NUMBERING_XML, DocxPackage
 from app.services.word.paragraph import _html_to_paragraphs, _shading_properties, _text_paragraph
 
@@ -25,6 +25,9 @@ class InsertSectionRequest:
     highlight: bool = False
     is_html: bool = False
     track_in_history: bool = False
+    # When set, the edit is written here (a copy) instead of over document_path,
+    # leaving the original untouched. When None, the original is edited in place.
+    output_path: str | None = None
 
 
 @dataclass
@@ -42,24 +45,42 @@ class SectionService:
         shade = self.settings.shade_fill if request.highlight else None
         level = min(9, max(1, request.level))
 
-        with DocxPackage(request.document_path).edit_copy() as pkg:
+        with DocxPackage(request.document_path).edit_copy(
+            destination=request.output_path
+        ) as pkg:
             body = pkg.body
             heading_styles = bookmarks.get_heading_style_map(pkg)
-            section = bookmarks.get_section_number_from_bookmark(
-                body, request.insert_before_bookmark, heading_styles
-            )
-            anchor = bookmarks.find_bookmark_paragraph(body, request.insert_before_bookmark)
-            if anchor is None:
-                return False
+            if request.insert_before_bookmark:
+                section = bookmarks.get_section_number_from_bookmark(
+                    body, request.insert_before_bookmark, heading_styles
+                )
+                anchor = bookmarks.find_bookmark_paragraph(body, request.insert_before_bookmark)
+                if anchor is None:
+                    return False
+            else:
+                section = ""
+                anchor = None
 
             logical_id = uuid.uuid4().hex[:8]
             start_id = bookmarks.get_next_bookmark_id(body)
-            end_id = start_id + 1
-            start_bm_s, start_bm_e = bookmarks.create_zero_length_bookmark(
-                f"Insert_Start_{logical_id}", start_id
+            heading_end_id = start_id + 1
+            content_start_id = heading_end_id + 1
+            content_end_id = content_start_id + 1
+            
+            # Markers for heading (not editable)
+            heading_start_bm_s, heading_start_bm_e = bookmarks.create_zero_length_bookmark(
+                f"Heading_Start_{logical_id}", start_id
             )
-            end_bm_s, end_bm_e = bookmarks.create_zero_length_bookmark(
-                f"Insert_End_{logical_id}", end_id
+            heading_end_bm_s, heading_end_bm_e = bookmarks.create_zero_length_bookmark(
+                f"Heading_End_{logical_id}", heading_end_id
+            )
+            
+            # Markers for content (editable)
+            content_start_bm_s, content_start_bm_e = bookmarks.create_zero_length_bookmark(
+                f"Content_Start_{logical_id}", content_start_id
+            )
+            content_end_bm_s, content_end_bm_e = bookmarks.create_zero_length_bookmark(
+                f"Content_End_{logical_id}", content_end_id
             )
 
             heading = etree.Element(w_tag("p"))
@@ -67,7 +88,10 @@ class SectionService:
             style = etree.SubElement(ppr, w_tag("pStyle"))
             style.set(w_tag("val"), f"Heading{level}")
             if shade:
-                heading.insert(0, _shading_properties(shade))
+                shd = etree.SubElement(ppr, w_tag("shd"))
+                shd.set(w_tag("val"), "clear")
+                shd.set(w_tag("color"), "auto")
+                shd.set(w_tag("fill"), shade)
             run = etree.SubElement(heading, w_tag("r"))
             t = etree.SubElement(run, w_tag("t"))
             t.text = request.title
@@ -77,14 +101,37 @@ class SectionService:
             else:
                 content_paras = [_text_paragraph(request.content, shade)]
 
-            to_insert: list = [start_bm_s, start_bm_e, heading]
+            to_insert: list = [heading_start_bm_s, heading_start_bm_e, heading, heading_end_bm_s, heading_end_bm_e]
+            to_insert.extend([content_start_bm_s, content_start_bm_e])
             to_insert.extend(content_paras)
-            to_insert.extend([end_bm_s, end_bm_e])
+            to_insert.extend([content_end_bm_s, content_end_bm_e])
 
-            bookmarks.insert_elements_before(anchor, to_insert)
+            if anchor is not None:
+                bookmarks.insert_elements_before(anchor, to_insert)
+            else:
+                bookmarks.append_elements_before_sectpr(body, to_insert)
+            
+            # Recalculate section numbers and update text in the document body
+            bookmarks.renumber_headings_after_insert(body, heading_styles, heading)
+            
             metadata.add_insert_section_metadata(
                 pkg, logical_id, request.document_path, section, level
             )
+            
+            # Bake the updated TOC directly into the document: splice in an
+            # entry for the new heading and renumber, while preserving every
+            # existing entry's page-number field and formatting. Because the
+            # field's cached result is now correct, neither MS Word nor the
+            # in-app viewer needs to update fields on open — so the user is NOT
+            # prompted ("update fields?" / "update table of contents?"). Page
+            # numbers keep their pre-insert values (approximate for entries
+            # after the insert); a manual F9 in Word, or the optional
+            # LibreOffice finalize pass, recomputes them exactly.
+            toc.insert_toc_entry(
+                pkg, heading, request.insert_before_bookmark, heading_styles
+            )
+            toc.clear_update_fields_on_open(pkg)
+
             pkg.set_xml(DOCUMENT_XML, pkg.document)
         return True
 

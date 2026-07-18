@@ -26,6 +26,7 @@ from app.dependencies import (
     get_audit_service,
     get_content_service,
     get_coversheet_service,
+    get_edit_content_service,
     get_fields_service,
     get_image_service,
     get_inserted_text_service,
@@ -39,9 +40,17 @@ from app.dependencies import (
 from app.models.schemas import (
     ApiResponse,
     ApplyCoversheetRequest,
+    ContentMarker,
     DeleteSectionRequest,
     DocumentListItem,
     DocumentPathRequest,
+    EditableContent,
+    GetContentMarkersRequest,
+    GetContentMarkersResult,
+    GetContentTextRequest,
+    GetContentTextResult,
+    GetEditableSectionsRequest,
+    GetEditableSectionsResult,
     InsertContentRequest,
     InsertContentResult,
     InsertParagraphRequest,
@@ -52,6 +61,8 @@ from app.models.schemas import (
     InsertedTextRequest,
     MergeDocumentRequest,
     MergeDocumentResult,
+    ReplaceContentTextRequest,
+    ReplaceContentTextResult,
     MergeSectionApiRequest,
     TocItem,
     UpdateInsertedTextBody,
@@ -527,6 +538,159 @@ def insert_content(
         )
     except Exception as e:
         return _ok(None, f"Content insert failed: {str(e)}", "content_insert_failed", success=False)
+
+
+@router.post(
+    "/editable-sections",
+    response_model=ApiResponse[GetEditableSectionsResult],
+    summary="Get all sections with editable content",
+    description=(
+        "Returns a list of all sections that contain user-inserted content (from Insert Content "
+        "or Insert Section operations). Each entry includes the section bookmark, number, title, "
+        "and a preview of the editable content."
+    ),
+)
+def get_editable_sections(
+    body: GetEditableSectionsRequest,
+    svc=Depends(get_edit_content_service),
+    settings: Settings = Depends(get_settings),
+    payload_svc=Depends(get_payload_service),
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_optional_user_id),
+) -> ApiResponse[GetEditableSectionsResult]:
+    norm_path = validate_document_path(body.document_path, settings)
+    _log_payload(settings, payload_svc, db, "/documents/editable-sections", extract_project_name(norm_path), body.model_dump(), user_id)
+
+    try:
+        from app.services.word.edit_content import GetEditableSectionsRequest as EditSvcRequest
+        result = svc.get_editable_sections(
+            EditSvcRequest(document_path=norm_path)
+        )
+        return _ok(result, "Found editable sections.", "editable_sections_retrieved")
+    except Exception as e:
+        return _ok(None, f"Failed to retrieve editable sections: {str(e)}", "editable_sections_failed", success=False)
+
+
+@router.post(
+    "/content-markers",
+    response_model=ApiResponse[GetContentMarkersResult],
+    summary="Get content markers for a section",
+    description=(
+        "Returns all content markers within a specific section. Each marker represents a block "
+        "of user-inserted content that can be edited. Includes a preview of each content block."
+    ),
+)
+def get_content_markers(
+    body: GetContentMarkersRequest,
+    svc=Depends(get_edit_content_service),
+    settings: Settings = Depends(get_settings),
+    payload_svc=Depends(get_payload_service),
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_optional_user_id),
+) -> ApiResponse[GetContentMarkersResult]:
+    norm_path = validate_document_path(body.document_path, settings)
+    _log_payload(settings, payload_svc, db, "/documents/content-markers", extract_project_name(norm_path), body.model_dump(), user_id)
+
+    try:
+        from app.services.word.edit_content import GetContentMarkersRequest as EditSvcRequest
+        result = svc.get_content_markers(
+            EditSvcRequest(document_path=norm_path, section_bookmark=body.section_bookmark)
+        )
+        return _ok(result, "Found content markers.", "content_markers_retrieved")
+    except Exception as e:
+        return _ok(None, f"Failed to retrieve content markers: {str(e)}", "content_markers_failed", success=False)
+
+
+@router.post(
+    "/content-text",
+    response_model=ApiResponse[GetContentTextResult],
+    summary="Get full content text between markers",
+    description=(
+        "Returns the complete HTML content between the Content_Start and Content_End markers "
+        "for a given logical_id. This text can be edited by the user and then replaced using "
+        "the replace-content-text endpoint."
+    ),
+)
+def get_content_text(
+    body: GetContentTextRequest,
+    svc=Depends(get_edit_content_service),
+    settings: Settings = Depends(get_settings),
+    payload_svc=Depends(get_payload_service),
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_optional_user_id),
+) -> ApiResponse[GetContentTextResult]:
+    norm_path = validate_document_path(body.document_path, settings)
+    _log_payload(settings, payload_svc, db, "/documents/content-text", extract_project_name(norm_path), body.model_dump(), user_id)
+
+    try:
+        from app.services.word.edit_content import GetContentTextRequest as EditSvcRequest
+        result = svc.get_content_text(
+            EditSvcRequest(document_path=norm_path, logical_id=body.logical_id)
+        )
+        return _ok(result, "Content text retrieved.", "content_text_retrieved")
+    except Exception as e:
+        return _ok(None, f"Failed to retrieve content text: {str(e)}", "content_text_failed", success=False)
+
+
+@router.post(
+    "/replace-content-text",
+    response_model=ApiResponse[ReplaceContentTextResult],
+    summary="Replace content text between markers",
+    description=(
+        "Replaces the content between Content_Start and Content_End markers with new HTML content. "
+        "Set `save_as_copy` to write the change to a new copy (named `copy_name`) in the source folder, "
+        "leaving the original untouched."
+    ),
+)
+def replace_content_text(
+    body: ReplaceContentTextRequest,
+    svc=Depends(get_edit_content_service),
+    settings: Settings = Depends(get_settings),
+    payload_svc=Depends(get_payload_service),
+    audit_svc=Depends(get_audit_service),
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_optional_user_id),
+) -> ApiResponse[ReplaceContentTextResult]:
+    norm_path = validate_document_path(body.document_path, settings)
+    _log_payload(settings, payload_svc, db, "/documents/replace-content-text", extract_project_name(norm_path), body.model_dump(), user_id)
+
+    # Resolve where the edit is written
+    if body.save_as_copy:
+        name = os.path.basename((body.copy_name or "").strip())
+        if not name:
+            return _ok(None, "Please provide a name for the copy.", "replace_content_copy_name_required", success=False)
+        if not name.lower().endswith(".docx"):
+            name += ".docx"
+        output_path = os.path.join(os.path.dirname(os.path.abspath(norm_path)), name)
+        if os.path.normpath(output_path) == os.path.normpath(norm_path):
+            return _ok(None, "The copy name matches the original. Choose a different name.", "replace_content_copy_conflict", success=False)
+        if os.path.exists(output_path):
+            return _ok(None, f"A file named '{name}' already exists. Choose a different name.", "replace_content_copy_exists", success=False)
+        created_copy = True
+    else:
+        output_path = norm_path
+        created_copy = False
+
+    try:
+        from app.services.word.edit_content import ReplaceContentTextRequest as EditSvcRequest
+        result = svc.replace_content_text(
+            EditSvcRequest(
+                document_path=norm_path,
+                logical_id=body.logical_id,
+                new_html_content=body.new_html_content,
+                save_as_copy=body.save_as_copy,
+                copy_name=body.copy_name,
+            )
+        )
+        where = f"copy {result.output_path}" if result.created_copy else norm_path
+        audit_svc.create(db, user_id, f"Content text replaced in {where}")
+        message = (
+            "Content text replaced into a new copy - the original is unchanged."
+            if result.created_copy else "Content text replaced."
+        )
+        return _ok(result, message, "replace_content_success")
+    except Exception as e:
+        return _ok(None, f"Content text replacement failed: {str(e)}", "replace_content_failed", success=False)
 
 
 @router.post(

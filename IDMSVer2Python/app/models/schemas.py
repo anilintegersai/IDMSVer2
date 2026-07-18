@@ -307,6 +307,68 @@ class InsertContentResult(BaseModel):
     created_copy: bool = Field(default=False, description="True when the change was written to a new copy, leaving the original unchanged.")
 
 
+class EditableContent(BaseModel):
+    """Represents an editable content block with its metadata."""
+    logical_id: str = Field(description="Unique identifier for the content block.")
+    section_bookmark: str = Field(description="TOC bookmark of the section containing this content.")
+    section_number: str = Field(description="Section number (e.g., '6.1', '7.2.1').")
+    section_title: str = Field(description="Section title.")
+    preview: str = Field(description="Preview text (first 40-50 characters).")
+
+
+class GetEditableSectionsRequest(BaseModel):
+    """Request to get all sections with editable content."""
+    document_path: str = Field(..., description="Target .docx file path.")
+
+
+class GetEditableSectionsResult(BaseModel):
+    """Result containing all sections with editable content."""
+    sections: list[EditableContent] = Field(description="List of editable content blocks.")
+
+
+class ContentMarker(BaseModel):
+    """Represents a content marker within a section."""
+    logical_id: str = Field(description="Unique identifier for the content block.")
+    preview: str = Field(description="Preview text (first 40-50 characters).")
+
+
+class GetContentMarkersRequest(BaseModel):
+    """Request to get content markers for a specific section."""
+    document_path: str = Field(..., description="Target .docx file path.")
+    section_bookmark: str = Field(..., description="TOC bookmark of the section.")
+
+
+class GetContentMarkersResult(BaseModel):
+    """Result containing content markers for a section."""
+    markers: list[ContentMarker] = Field(description="List of content markers in the section.")
+
+
+class GetContentTextRequest(BaseModel):
+    """Request to get the full text between markers."""
+    document_path: str = Field(..., description="Target .docx file path.")
+    logical_id: str = Field(..., description="Unique identifier for the content block.")
+
+
+class GetContentTextResult(BaseModel):
+    """Result containing the HTML content between markers."""
+    html_content: str = Field(description="HTML content between the markers.")
+
+
+class ReplaceContentTextRequest(BaseModel):
+    """Request to replace content between markers."""
+    document_path: str = Field(..., description="Target .docx file path.")
+    logical_id: str = Field(..., description="Unique identifier for the content block.")
+    new_html_content: str = Field(..., description="New HTML content to insert.")
+    save_as_copy: bool = Field(default=False, description="When true, write to a new copy instead of modifying original.")
+    copy_name: str | None = Field(default=None, description="File name for the copy (required when save_as_copy is true).")
+
+
+class ReplaceContentTextResult(BaseModel):
+    """Result of a replace-content operation."""
+    output_path: str = Field(description="Path to the document that was written (the copy, or the original when edited in place).")
+    created_copy: bool = Field(default=False, description="True when the change was written to a new copy, leaving the original unchanged.")
+
+
 class DeleteSectionRequest(BaseModel):
     """Remove one or more sections identified by bookmark pairs."""
 

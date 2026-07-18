@@ -130,3 +130,87 @@ export async function insertContent(
   const { data } = await http.post<ApiResponse<InsertContentResult>>("/documents/content", payload);
   return data;
 }
+
+export interface EditableContent {
+  logical_id: string;
+  section_bookmark: string;
+  section_number: string;
+  section_title: string;
+  preview: string;
+}
+
+export interface GetEditableSectionsPayload {
+  document_path: string;
+}
+
+export interface GetEditableSectionsResult {
+  sections: EditableContent[];
+}
+
+export interface ContentMarker {
+  logical_id: string;
+  preview: string;
+}
+
+export interface GetContentMarkersPayload {
+  document_path: string;
+  section_bookmark: string;
+}
+
+export interface GetContentMarkersResult {
+  markers: ContentMarker[];
+}
+
+export interface GetContentTextPayload {
+  document_path: string;
+  logical_id: string;
+}
+
+export interface GetContentTextResult {
+  html_content: string;
+}
+
+export interface ReplaceContentTextPayload {
+  document_path: string;
+  logical_id: string;
+  new_html_content: string;
+  save_as_copy: boolean;
+  copy_name: string | null;
+}
+
+export interface ReplaceContentTextResult {
+  output_path: string;
+  created_copy: boolean;
+}
+
+/** Get all sections with editable content. */
+export async function getEditableSections(
+  payload: GetEditableSectionsPayload,
+): Promise<ApiResponse<GetEditableSectionsResult>> {
+  const { data } = await http.post<ApiResponse<GetEditableSectionsResult>>("/documents/editable-sections", payload);
+  return data;
+}
+
+/** Get content markers for a specific section. */
+export async function getContentMarkers(
+  payload: GetContentMarkersPayload,
+): Promise<ApiResponse<GetContentMarkersResult>> {
+  const { data } = await http.post<ApiResponse<GetContentMarkersResult>>("/documents/content-markers", payload);
+  return data;
+}
+
+/** Get full content text between markers. */
+export async function getContentText(
+  payload: GetContentTextPayload,
+): Promise<ApiResponse<GetContentTextResult>> {
+  const { data } = await http.post<ApiResponse<GetContentTextResult>>("/documents/content-text", payload);
+  return data;
+}
+
+/** Replace content text between markers. */
+export async function replaceContentText(
+  payload: ReplaceContentTextPayload,
+): Promise<ApiResponse<ReplaceContentTextResult>> {
+  const { data } = await http.post<ApiResponse<ReplaceContentTextResult>>("/documents/replace-content-text", payload);
+  return data;
+}
