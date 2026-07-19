@@ -50,16 +50,22 @@ class DocxPackage:
                 self._parts[name] = zf.read(name)
 
     @contextmanager
-    def edit_copy(self) -> Iterator["DocxPackage"]:
-        """Open a writable working copy and persist changes back to the original path."""
+    def edit_copy(self, destination: str | None = None) -> Iterator["DocxPackage"]:
+        """Open a writable working copy and persist changes.
+
+        By default the edits are saved back over the original path. Pass
+        ``destination`` to write the result to a different file instead; the
+        original is then left completely untouched (used for "save as a copy").
+        """
         original = self.path
+        target = os.path.normpath(destination) if destination else original
         tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
         tmp.close()
         shutil.copy2(original, tmp.name)
         pkg = DocxPackage(tmp.name, writable=True)
         try:
             yield pkg
-            pkg.save(destination=original)
+            pkg.save(destination=target)
         finally:
             if os.path.exists(tmp.name):
                 os.unlink(tmp.name)

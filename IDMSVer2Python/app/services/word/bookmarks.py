@@ -25,10 +25,46 @@ def find_bookmark_paragraph(body: etree._Element, name: str) -> etree._Element |
     if bm is None:
         return None
     parent = bm.getparent()
+
+    # Walk up to find paragraph
     while parent is not None and parent.tag != w_tag("body"):
         if parent.tag == w_tag("p"):
             return parent
         parent = parent.getparent()
+
+    # If bookmark is directly in body, find the next paragraph
+    if parent is not None and parent.tag == w_tag("body"):
+        index = parent.index(bm)
+        for i in range(index + 1, len(parent)):
+            elem = parent[i]
+            if elem.tag == w_tag("p"):
+                return elem
+        return None
+
+    # If bookmark is in document (not body), find the body and look for paragraph after bookmark
+    if parent is not None and parent.tag == w_tag("document"):
+        # Find the body element
+        body_elem = parent.find(w_tag("body"))
+        if body_elem is not None:
+            # The bookmark is a sibling of body in document, so we need to find
+            # which paragraph in body comes after this bookmark
+            # Since bookmarks are zero-length, we find the paragraph that follows
+            # the bookmark in the document structure
+            bookmark_index = parent.index(bm)
+            body_index = parent.index(body_elem)
+
+            # If bookmark comes before body in document, return first paragraph of body
+            if bookmark_index < body_index:
+                first_para = body_elem.find(w_tag("p"))
+                return first_para
+
+            # If bookmark comes after body, return last paragraph of body
+            if bookmark_index > body_index:
+                paras = body_elem.findall(w_tag("p"))
+                if paras:
+                    return paras[-1]
+        return None
+
     return bm.getparent()
 
 
@@ -60,7 +96,7 @@ def get_elements_between(start: etree._Element, end: etree._Element) -> list[etr
     parent = start.getparent()
     if parent is None or parent != end.getparent():
         return []
-    
+
     elements: list[etree._Element] = []
     capturing = False
     for child in parent:
@@ -88,11 +124,11 @@ def is_element_between(element: etree._Element, start: etree._Element, end: etre
             elif found_start and child is element:
                 return True
         return False
-    
+
     parent = start.getparent()
     if parent is None or parent != element.getparent() or parent != end.getparent():
         return False
-    
+
     found_start = False
     for child in parent:
         if child is start:
@@ -107,10 +143,29 @@ def is_element_between(element: etree._Element, start: etree._Element, end: etre
 def find_bookmark_paragraph_by_element(body: etree._Element, bookmark_start: etree._Element) -> etree._Element | None:
     """Find the paragraph containing a bookmark start element."""
     parent = bookmark_start.getparent()
+
+    # First try to find paragraph by walking up
     while parent is not None and parent.tag != w_tag("body"):
         if parent.tag == w_tag("p"):
             return parent
         parent = parent.getparent()
+
+    # If bookmark is directly in body, find the next paragraph
+    if parent is not None and parent.tag == w_tag("body"):
+        index = parent.index(bookmark_start)
+        for i in range(index + 1, len(parent)):
+            elem = parent[i]
+            if elem.tag == w_tag("p"):
+                return elem
+
+    # If bookmark is in document (not body), find the body and return first paragraph
+    if parent is not None and parent.tag == w_tag("document"):
+        body_elem = parent.find(w_tag("body"))
+        if body_elem is not None:
+            first_para = body_elem.find(w_tag("p"))
+            return first_para
+        return None
+
     return None
 
 
@@ -128,29 +183,29 @@ def get_element_after_bookmark(body: etree._Element, bookmark_name: str) -> etre
     bookmark_end = body.find(f".//w:bookmarkEnd[@w:name='{bookmark_name}']", namespaces=NSMAP)
     if bookmark_end is None:
         return None
-    
+
     # Find the next sibling after the bookmark end
     parent = bookmark_end.getparent()
     if parent is None:
         return None
-    
+
     index = parent.index(bookmark_end)
     if index + 1 < len(parent):
         return parent[index + 1]
-    
+
     # If no sibling in parent, look for next paragraph in body
     para = find_bookmark_paragraph(body, bookmark_name)
     if para is None:
         return None
-    
+
     parent_body = para.getparent()
     if parent_body is None:
         return None
-    
+
     para_index = parent_body.index(para)
     if para_index + 1 < len(parent_body):
         return parent_body[para_index + 1]
-    
+
     return None
 
 
@@ -159,7 +214,7 @@ def find_next_heading(body: etree._Element, start_para: etree._Element, heading_
     parent = start_para.getparent()
     if parent is None:
         return None
-    
+
     found_start = False
     for child in parent:
         if child is start_para:
@@ -175,7 +230,7 @@ def find_previous_heading(body: etree._Element, start_para: etree._Element, head
     parent = start_para.getparent()
     if parent is None:
         return None
-    
+
     previous_heading = None
     for child in parent:
         if child is start_para:
