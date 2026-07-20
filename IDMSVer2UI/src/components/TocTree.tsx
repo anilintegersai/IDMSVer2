@@ -8,6 +8,7 @@ interface Props {
   onNodeDragStart?: (n: TreeNode) => void;
   onNodeDragEnd?: () => void;
   onNodeDrop?: (target: TreeNode) => void;
+  onNodeContextMenu?: (e: React.MouseEvent, node: TreeNode) => void;
   emptyText?: string;
 }
 
@@ -18,6 +19,7 @@ export default function TocTree({
   onNodeDragStart,
   onNodeDragEnd,
   onNodeDrop,
+  onNodeContextMenu,
   emptyText,
 }: Props) {
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -66,6 +68,13 @@ export default function TocTree({
                 e.preventDefault();
                 setHoverId(null);
                 onNodeDrop?.(node);
+              }
+            : undefined
+        }
+        onContextMenu={
+          onNodeContextMenu
+            ? (e) => {
+                onNodeContextMenu(e, node);
               }
             : undefined
         }

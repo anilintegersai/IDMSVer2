@@ -18,6 +18,19 @@ export interface DocumentListItem {
   path: string;
 }
 
+export interface TocEntry {
+  sl_no: number;
+  item_text: string;
+  page_ref: string;
+  page_no: string;
+  section_number: string;
+  level: number;
+}
+
+export interface GetTocResult {
+  entries: TocEntry[];
+}
+
 export interface MergeResult {
   output_path: string;
   logical_id: string | null;
@@ -45,6 +58,14 @@ export async function getToc(documentPath: string): Promise<TocItem[]> {
     document_path: documentPath,
   });
   return data.data ?? [];
+}
+
+/** Fetch a document's table of contents as a flat list. */
+export async function getTocFlat(documentPath: string): Promise<ApiResponse<GetTocResult>> {
+  const { data } = await http.post<ApiResponse<GetTocResult>>("/documents/toc/flat", {
+    document_path: documentPath,
+  });
+  return data;
 }
 
 export interface MergeSectionPayload {

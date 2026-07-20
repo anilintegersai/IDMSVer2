@@ -36,6 +36,7 @@ from app.dependencies import (
     get_payload_service,
     get_replace_service,
     get_section_service,
+    get_toc_service,
 )
 from app.models.schemas import (
     ApiResponse,
@@ -51,6 +52,8 @@ from app.models.schemas import (
     GetContentTextResult,
     GetEditableSectionsRequest,
     GetEditableSectionsResult,
+    GetTocRequest,
+    GetTocResult,
     InsertContentRequest,
     InsertContentResult,
     InsertParagraphRequest,
@@ -132,6 +135,31 @@ def get_table_of_contents(body: DocumentPathRequest) -> ApiResponse[list[TocItem
     if items:
         return _ok(items, "TOC found.", "toc_success")
     return _ok([], "No TOC entries found.", "toc_empty", success=False)
+
+
+@router.post(
+    "/toc/flat",
+    response_model=ApiResponse[GetTocResult],
+    summary="Get document table of contents (flat)",
+    description=(
+        "Reads the Word document and returns its table of contents as a **flat list**. "
+        "Each entry carries `sl_no`, `item_text`, `page_ref`, and `page_no` for display. "
+        "This is a simpler format suitable for JSON display and basic TOC viewing."
+    ),
+    response_description="Flat TOC entries in `data`, or empty list with `toc_empty` code.",
+)
+def get_table_of_contents_flat(
+    body: DocumentPathRequest,
+    toc_service=Depends(get_toc_service),
+) -> ApiResponse[GetTocResult]:
+    """Return the document's table of contents as a flat list."""
+    # Validate the document path is inside allowed roots before opening
+    norm_path = validate_document_path(body.document_path, get_settings())
+    request = GetTocRequest(document_path=norm_path)
+    result = toc_service.get_toc(request)
+    if result.entries:
+        return _ok(result, "TOC found.", "toc_success")
+    return _ok(GetTocResult(entries=[]), "No TOC entries found.", "toc_empty", success=False)
 
 
 @router.get(

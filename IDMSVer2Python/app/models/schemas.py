@@ -68,6 +68,33 @@ class TocItem(BaseModel):
 TocItem.model_rebuild()
 
 
+class TocEntry(BaseModel):
+    """A single TOC entry with basic fields."""
+
+    sl_no: int = Field(description="Serial/order number of the TOC entry.")
+    item_text: str = Field(description="Heading or section title as shown in the TOC.")
+    page_ref: str = Field(default="", description="Internal page reference/bookmark anchor.")
+    page_no: str = Field(default="", description="Printed page number shown in the TOC.")
+    section_number: str = Field(default="", description="Hierarchical section number, e.g. `1.2.3`.")
+    level: int = Field(default=1, description="Outline depth: 1 = top level, 2 = sub-section, …")
+
+
+class GetTocRequest(BaseModel):
+    """Request to get TOC from a document."""
+
+    document_path: str = Field(
+        ...,
+        description="Full UNC or local path to an existing .docx file.",
+        examples=[_UNC_EXAMPLE],
+    )
+
+
+class GetTocResult(BaseModel):
+    """Result containing TOC entries."""
+
+    entries: list[TocEntry] = Field(description="List of TOC entries from the document.")
+
+
 class DocumentListItem(BaseModel):
     """A selectable source document."""
 

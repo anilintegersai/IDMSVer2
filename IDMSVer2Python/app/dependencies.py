@@ -20,6 +20,7 @@ from app.services.word.merge import MergeService
 from app.services.word.paragraph import ParagraphService
 from app.services.word.section import SectionService
 from app.services.word.replace_document import ReplaceDocumentService
+from app.services.word.toc_service import TocService
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,10 @@ def get_inserted_text_service(
 
 def get_replace_service() -> ReplaceDocumentService:
     return ReplaceDocumentService()
+
+
+def get_toc_service(settings: Annotated[Settings, Depends(get_settings)]) -> TocService:
+    return TocService(settings)
 
 
 def get_audit_service(settings: Annotated[Settings, Depends(get_settings)]) -> AuditService:
