@@ -38,6 +38,20 @@ class Settings(BaseSettings):
         "All operations use pure OOXML manipulation — no Microsoft Word installation required."
     )
 
+    # CORS configuration — set explicit origins in production
+    cors_allowed_origins: list[str] = ["http://localhost:3000"]
+    cors_allow_credentials: bool = False
+    cors_allow_methods: list[str] = ["*"]
+    cors_allow_headers: list[str] = ["*"]
+
+    # Debugging/dev flags
+    debug: bool = False
+
+    # Upload & rate limiting
+    max_upload_size_bytes: int = 10 * 1024 * 1024  # 10 MB by default
+    rate_limit_enabled: bool = False
+    rate_limit_per_min: int = 60
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -147,11 +147,12 @@ class SectionService:
                     )
                 removing = False
                 for child in list(body):
+                    if child is stop_para:
+                        # Stop before removing the stop paragraph
+                        break
                     if child is start_para:
                         removing = True
                     if removing:
                         body.remove(child)
-                    if child is stop_para:
-                        break
             pkg.set_xml(DOCUMENT_XML, pkg.document)
         return True

@@ -102,18 +102,23 @@ export default function DeleteSection() {
       const stopBookmark = nextSameOrHigherBookmark(flatToc, selectedNode.id);
       
       if (!stopBookmark) {
-        setBanner({ kind: "err", text: "Could not determine section boundaries." });
+        setBanner({ kind: "err", text: "Could not determine section boundaries - this might be the last section." });
         return;
       }
       
       const sections: Record<string, string> = {};
       sections[selectedNode.bookmark] = stopBookmark;
 
+      console.log("Deleting sections:", sections);
+      console.log("Start bookmark:", selectedNode.bookmark, "Stop bookmark:", stopBookmark);
+
       const res = await deleteSections({
         document_path: selectedPath,
         sections,
         track_in_history: false,
       });
+
+      console.log("Delete response:", res);
 
       if (res.success) {
         setConfirmOpen(false);
@@ -127,6 +132,7 @@ export default function DeleteSection() {
         setBanner({ kind: "err", text: res.message || "Failed to delete section." });
       }
     } catch (e) {
+      console.error("Delete error:", e);
       setBanner({ kind: "err", text: e instanceof Error ? e.message : "Delete request failed." });
     } finally {
       setDeleting(false);
