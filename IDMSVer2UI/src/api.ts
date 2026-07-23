@@ -204,6 +204,16 @@ export interface ReplaceContentTextResult {
   created_copy: boolean;
 }
 
+export interface DeleteSectionPayload {
+  document_path: string;
+  sections: Record<string, string>;
+  track_in_history?: boolean;
+}
+
+export interface DeleteSectionResult {
+  success: boolean;
+}
+
 /** Get all sections with editable content. */
 export async function getEditableSections(
   payload: GetEditableSectionsPayload,
@@ -233,5 +243,13 @@ export async function replaceContentText(
   payload: ReplaceContentTextPayload,
 ): Promise<ApiResponse<ReplaceContentTextResult>> {
   const { data } = await http.post<ApiResponse<ReplaceContentTextResult>>("/documents/replace-content-text", payload);
+  return data;
+}
+
+/** Delete sections from a document. */
+export async function deleteSections(
+  payload: DeleteSectionPayload,
+): Promise<ApiResponse<DeleteSectionResult>> {
+  const { data } = await http.post<ApiResponse<DeleteSectionResult>>("/documents/sections/delete", payload);
   return data;
 }

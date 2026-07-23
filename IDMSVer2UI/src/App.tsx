@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import MergeTemplates from "./pages/MergeTemplates";
 import InsertContent from "./pages/InsertContent";
 import EditContent from "./pages/EditContent";
+import DeleteSection from "./pages/DeleteSection";
 import TocViewer from "./pages/TocViewer";
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/merge-templates" element={<MergeTemplates />} />
           <Route path="/insert-content" element={<InsertContent />} />
           <Route path="/edit-content" element={<EditContent />} />
+          <Route path="/delete-section" element={<DeleteSection />} />
           <Route path="/toc-viewer" element={<TocViewer />} />
           <Route path="*" element={<Navigate to="/merge-templates" replace />} />
         </Routes>

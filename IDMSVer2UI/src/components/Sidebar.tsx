@@ -39,6 +39,15 @@ const MENU: MenuEntry[] = [
     ),
   },
   {
+    to: "/delete-section",
+    label: "Delete Section",
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M3 6h18M8 6V4h8v2M10 11v6M14 11v6M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      </svg>
+    ),
+  },
+  {
     to: "/toc-viewer",
     label: "TOC",
     icon: (
