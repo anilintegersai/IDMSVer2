@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 
@@ -13,6 +14,52 @@ from app.core.namespaces import w_tag
 from app.services.word import bookmarks, metadata, numbering, toc
 from app.services.word.document_package import DOCUMENT_XML, NUMBERING_XML, DocxPackage
 from app.services.word.paragraph import _html_to_paragraphs, _shading_properties, _text_paragraph
+
+logger = logging.getLogger(__name__)
+
+
+def update_toc_via_com(document_path: str) -> bool:
+    """Update TOC field using Word COM automation (requires Word installed).
+    
+    Args:
+        document_path: Path to the Word document
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        import win32com.client
+    except ImportError:
+        logger.warning("pywin32 not installed - COM automation not available. Install with: pip install pywin32")
+        return False
+    
+    try:
+        word = win32com.client.Dispatch("Word.Application")
+        word.Visible = False
+        word.DisplayAlerts = 0
+        
+        doc = word.Documents.Open(document_path)
+        
+        # Update all TOCs in the document
+        toc_count = doc.TablesOfContents.Count
+        logger.info(f"Found {toc_count} TOC(s) in document")
+        
+        for toc_index in range(1, toc_count + 1):
+            doc.TablesOfContents(toc_index).Update()
+            logger.info(f"Updated TOC {toc_index}")
+        
+        doc.Close(SaveChanges=True)
+        word.Quit()
+        
+        logger.info(f"Successfully updated TOC via COM for {document_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update TOC via COM: {e}")
+        try:
+            word.Quit()
+        except:
+            pass
+        return False
 
 
 @dataclass
@@ -35,6 +82,7 @@ class DeleteSectionRequest:
     document_path: str
     toc_bookmarks: dict[str, str]
     track_in_history: bool = False
+    update_toc: bool = False
 
 
 class SectionService:
@@ -155,4 +203,9 @@ class SectionService:
                     if removing:
                         body.remove(child)
             pkg.set_xml(DOCUMENT_XML, pkg.document)
+        
+        # Update TOC via COM automation if requested
+        if request.update_toc:
+            update_toc_via_com(request.document_path)
+        
         return True

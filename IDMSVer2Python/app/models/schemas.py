@@ -409,6 +409,7 @@ class DeleteSectionRequest(BaseModel):
                         "_Toc200000001": "_Toc200000002",
                     },
                     "track_in_history": False,
+                    "update_toc": False,
                 }
             ]
         }
@@ -420,6 +421,7 @@ class DeleteSectionRequest(BaseModel):
         description="Dictionary mapping each **start** bookmark to its **stop** bookmark. All content between them is removed.",
     )
     track_in_history: bool = Field(default=False, description="Reserved for revision-history integration.")
+    update_toc: bool = Field(default=False, description="If True, use Word COM automation to update TOC fields after deletion. Requires Word installed on server.")
 
 
 class ApplyCoversheetRequest(BaseModel):

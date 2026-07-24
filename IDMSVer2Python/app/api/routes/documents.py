@@ -747,6 +747,7 @@ def delete_sections(
             document_path=norm_path,
             toc_bookmarks=body.sections,
             track_in_history=body.track_in_history,
+            update_toc=body.update_toc,
         )
     )
     if ok:

@@ -208,6 +208,7 @@ export interface DeleteSectionPayload {
   document_path: string;
   sections: Record<string, string>;
   track_in_history?: boolean;
+  update_toc?: boolean;
 }
 
 export interface DeleteSectionResult {

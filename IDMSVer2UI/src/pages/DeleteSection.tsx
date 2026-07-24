@@ -35,6 +35,7 @@ export default function DeleteSection() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [updateToc, setUpdateToc] = useState(false);
   
   // Viewer reload key
   const [viewerKey, setViewerKey] = useState(0);
@@ -116,6 +117,7 @@ export default function DeleteSection() {
         document_path: selectedPath,
         sections,
         track_in_history: false,
+        update_toc: updateToc,
       });
 
       console.log("Delete response:", res);
@@ -251,6 +253,19 @@ export default function DeleteSection() {
                 This will delete the selected section and all its children. This action cannot be undone.
               </p>
               <p>Are you sure you want to proceed?</p>
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={updateToc}
+                    onChange={(e) => setUpdateToc(e.target.checked)}
+                  />
+                  Update Table of Contents using Word COM automation
+                </label>
+                <p className="form-hint">
+                  Requires Microsoft Word to be installed on the server. Updates TOC fields in the document after deletion.
+                </p>
+              </div>
             </div>
 
             <div className="modal-footer">
