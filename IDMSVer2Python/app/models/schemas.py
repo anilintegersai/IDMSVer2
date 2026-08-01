@@ -134,6 +134,7 @@ class MergeSectionApiRequest(BaseModel):
     output_filename: str | None = Field(
         default=None, description="Optional output file name; auto-generated when omitted."
     )
+    update_toc: bool = Field(default=False, description="If True, use Word COM automation to update TOC fields after merge. Requires Word installed on server.")
 
 
 class MergeSourceSection(BaseModel):
@@ -275,6 +276,7 @@ class InsertSectionRequest(BaseModel):
         "appended if missing; any path components are stripped so the copy stays in the source folder.",
     )
     track_in_history: bool = Field(default=False, description="Reserved for revision-history integration.")
+    update_toc: bool = Field(default=False, description="If True, use Word COM automation to update TOC fields after insertion. Requires Word installed on server.")
 
 
 class InsertSectionResult(BaseModel):
@@ -325,6 +327,7 @@ class InsertContentRequest(BaseModel):
         "appended if missing; any path components are stripped so the copy stays in the source folder.",
     )
     track_in_history: bool = Field(default=False, description="Reserved for revision-history integration.")
+    update_toc: bool = Field(default=False, description="If True, use Word COM automation to update TOC fields after insertion. Requires Word installed on server.")
 
 
 class InsertContentResult(BaseModel):
@@ -388,6 +391,7 @@ class ReplaceContentTextRequest(BaseModel):
     new_html_content: str = Field(..., description="New HTML content to insert.")
     save_as_copy: bool = Field(default=False, description="When true, write to a new copy instead of modifying original.")
     copy_name: str | None = Field(default=None, description="File name for the copy (required when save_as_copy is true).")
+    update_toc: bool = Field(default=False, description="If True, use Word COM automation to update TOC fields after replacement. Requires Word installed on server.")
 
 
 class ReplaceContentTextResult(BaseModel):

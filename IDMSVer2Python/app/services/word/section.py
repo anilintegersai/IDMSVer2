@@ -72,6 +72,7 @@ class InsertSectionRequest:
     highlight: bool = False
     is_html: bool = False
     track_in_history: bool = False
+    update_toc: bool = False
     # When set, the edit is written here (a copy) instead of over document_path,
     # leaving the original untouched. When None, the original is edited in place.
     output_path: str | None = None
@@ -181,6 +182,12 @@ class SectionService:
             toc.clear_update_fields_on_open(pkg)
 
             pkg.set_xml(DOCUMENT_XML, pkg.document)
+        
+        # Update TOC via COM automation if requested
+        if request.update_toc:
+            output_path = request.output_path or request.document_path
+            update_toc_via_com(output_path)
+        
         return True
 
     def delete_sections(self, request: DeleteSectionRequest) -> bool:

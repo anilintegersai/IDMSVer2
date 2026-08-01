@@ -232,6 +232,11 @@ def merge_section(
             insert_before_bookmark=body.insert_before_bookmark,
         )
     )
+    
+    # Update TOC via COM automation if requested
+    if body.update_toc and result.success:
+        from app.services.word.section import update_toc_via_com
+        update_toc_via_com(result.output_path)
     if result.success:
         audit_svc.create(db, user_id, f"Section merged into {result.output_path}")
         return _ok(
@@ -477,6 +482,7 @@ def insert_section(
             highlight=body.highlight,
             is_html=body.is_html,
             track_in_history=body.track_in_history,
+            update_toc=body.update_toc,
             output_path=output_path if created_copy else None,
         )
     )
@@ -551,6 +557,7 @@ def insert_content(
                 save_as_copy=body.save_as_copy,
                 copy_name=body.copy_name,
                 track_in_history=body.track_in_history,
+                update_toc=body.update_toc,
             )
         )
         where = f"copy {actual_output_path}" if actual_created_copy else norm_path
@@ -708,6 +715,7 @@ def replace_content_text(
                 new_html_content=body.new_html_content,
                 save_as_copy=body.save_as_copy,
                 copy_name=body.copy_name,
+                update_toc=body.update_toc,
             )
         )
         where = f"copy {result.output_path}" if result.created_copy else norm_path

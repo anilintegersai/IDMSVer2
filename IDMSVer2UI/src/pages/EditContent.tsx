@@ -39,6 +39,7 @@ export default function EditContent() {
   const [copyName, setCopyName] = useState("");
   const [modalError, setModalError] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
+  const [updateToc, setUpdateToc] = useState(false);
 
   useEffect(() => {
     listDocuments()
@@ -150,6 +151,7 @@ export default function EditContent() {
         new_html_content: htmlContent,
         save_as_copy: saveAsCopy,
         copy_name: saveAsCopy ? copyName.trim() : null,
+        update_toc: updateToc,
       });
 
       if (res.success) {
@@ -356,6 +358,20 @@ export default function EditContent() {
                   />
                 </div>
               )}
+
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={updateToc}
+                    onChange={(e) => setUpdateToc(e.target.checked)}
+                  />
+                  Update Table of Contents using Word COM automation
+                </label>
+                <p className="form-hint">
+                  Requires Microsoft Word to be installed on the server. Updates TOC fields in the document after replacement.
+                </p>
+              </div>
 
               {modalError && <div className="banner banner-err">{modalError}</div>}
             </div>

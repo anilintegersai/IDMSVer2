@@ -56,6 +56,7 @@ export default function InsertContent() {
   const [saveAsCopy, setSaveAsCopy] = useState(true);
   const [copyName, setCopyName] = useState("");
   const [modalError, setModalError] = useState("");
+  const [updateToc, setUpdateToc] = useState(false);
   
   // Viewer reload key
   const [viewerKey, setViewerKey] = useState(0);
@@ -155,6 +156,7 @@ export default function InsertContent() {
         highlight,
         save_as_copy: saveAsCopy,
         copy_name: saveAsCopy ? copyName.trim() : null,
+        update_toc: updateToc,
       });
 
       if (res.success) {
@@ -413,6 +415,20 @@ export default function InsertContent() {
                   />
                 </div>
               )}
+
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={updateToc}
+                    onChange={(e) => setUpdateToc(e.target.checked)}
+                  />
+                  Update Table of Contents using Word COM automation
+                </label>
+                <p className="form-hint">
+                  Requires Microsoft Word to be installed on the server. Updates TOC fields in the document after insertion.
+                </p>
+              </div>
 
               {modalError && <div className="form-error">{modalError}</div>}
             </div>

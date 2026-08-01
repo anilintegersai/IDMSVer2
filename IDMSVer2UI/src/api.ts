@@ -75,6 +75,7 @@ export interface MergeSectionPayload {
   source_stop_bookmark: string | null;
   insert_before_bookmark: string | null;
   output_filename: string;
+  update_toc?: boolean;
 }
 
 /** Merge a section (heading + descendants) into a copy of the master. */
@@ -110,6 +111,7 @@ export interface InsertSectionPayload {
   save_as_copy?: boolean;
   /** File name for the copy (required when save_as_copy is true). */
   copy_name?: string | null;
+  update_toc?: boolean;
 }
 
 export interface InsertSectionResult {
@@ -137,6 +139,7 @@ export interface InsertContentPayload {
   save_as_copy?: boolean;
   copy_name?: string | null;
   track_in_history?: boolean;
+  update_toc?: boolean;
 }
 
 export interface InsertContentResult {
@@ -197,6 +200,7 @@ export interface ReplaceContentTextPayload {
   new_html_content: string;
   save_as_copy: boolean;
   copy_name: string | null;
+  update_toc?: boolean;
 }
 
 export interface ReplaceContentTextResult {

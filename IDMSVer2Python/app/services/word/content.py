@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import uuid
 from dataclasses import dataclass
 
@@ -14,6 +15,8 @@ from app.core.namespaces import A_NS, PIC_NS, WP_NS, NSMAP, w_tag
 from app.services.word import bookmarks, metadata
 from app.services.word.document_package import DOCUMENT_XML, DocxPackage
 from app.services.word.paragraph import _html_to_paragraphs, _text_paragraph
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -29,6 +32,7 @@ class InsertContentRequest:
     save_as_copy: bool = False
     copy_name: str | None = None
     track_in_history: bool = False
+    update_toc: bool = False
 
 
 class ContentService:
@@ -136,6 +140,12 @@ class ContentService:
             pkg.set_xml(DOCUMENT_XML, pkg.document)
         
         actual_output_path = output_path if output_path else request.document_path
+        
+        # Update TOC via COM automation if requested
+        if request.update_toc:
+            from app.services.word.section import update_toc_via_com
+            update_toc_via_com(actual_output_path)
+        
         return actual_output_path, created_copy
     
     def _create_image_paragraph(

@@ -49,6 +49,7 @@ export default function MergeTemplates() {
   const [viewerOpen, setViewerOpen] = useState(false);
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [mergeName, setMergeName] = useState("");
+  const [updateToc, setUpdateToc] = useState(false);
 
   const mergeNameValid = /\.docx$/i.test(mergeName.trim());
 
@@ -158,6 +159,7 @@ export default function MergeTemplates() {
         source_stop_bookmark: pending.sourceStop,
         insert_before_bookmark: pending.insertBefore,
         output_filename: mergeName.trim(),
+        update_toc: updateToc,
       });
       if (res.success && res.data) {
         setMergedPath(res.data.output_path);
@@ -220,6 +222,23 @@ export default function MergeTemplates() {
           {mergeName.trim() && !mergeNameValid && (
             <span className="merge-name-hint">The name must end with <code>.docx</code></span>
           )}
+        </div>
+      </div>
+
+      <div className="merge-name-bar">
+        <label className="merge-name-label">Options</label>
+        <div className="merge-name-field">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={updateToc}
+              onChange={(e) => setUpdateToc(e.target.checked)}
+            />
+            Update Table of Contents using Word COM automation
+          </label>
+          <p className="form-hint">
+            Requires Microsoft Word to be installed on the server. Updates TOC fields in the merged document.
+          </p>
         </div>
       </div>
 

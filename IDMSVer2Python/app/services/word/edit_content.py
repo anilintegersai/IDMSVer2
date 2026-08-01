@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from lxml import etree
 
@@ -10,6 +11,8 @@ from app.core.namespaces import NSMAP, w_tag
 from app.services.word import bookmarks
 from app.services.word.document_package import DocxPackage
 from app.services.word.paragraph import _html_to_paragraphs
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,6 +70,7 @@ class ReplaceContentTextRequest:
     new_html_content: str
     save_as_copy: bool = False
     copy_name: str | None = None
+    update_toc: bool = False
 
 
 @dataclass
@@ -84,22 +88,22 @@ class EditContentService:
         pkg = DocxPackage(request.document_path, writable=False)
         body = pkg.body
         heading_styles = bookmarks.get_heading_style_map(pkg)
-
+        
         editable_sections: list[EditableContent] = []
-
+        
         # Find all Content_Start bookmarks
         for bookmark_start in body.findall(".//w:bookmarkStart", namespaces=NSMAP):
             bookmark_name = bookmark_start.get(f"{{{NSMAP['w']}}}name")
             if bookmark_name and bookmark_name.startswith("Content_Start_"):
                 logical_id = bookmark_name.replace("Content_Start_", "")
-
+                
                 # Find the section this content belongs to
                 section_bookmark, section_number, section_title = self._find_section_for_content(body, bookmark_start, heading_styles)
-
+                
                 if section_bookmark:
                     # Get preview text
                     preview = self._get_content_preview(body, logical_id)
-
+                    
                     editable_sections.append(EditableContent(
                         logical_id=logical_id,
                         section_bookmark=section_bookmark,
@@ -107,7 +111,7 @@ class EditContentService:
                         section_title=section_title,
                         preview=preview
                     ))
-
+        
         return GetEditableSectionsResult(sections=editable_sections)
 
     def get_content_markers(self, request: GetContentMarkersRequest) -> GetContentMarkersResult:
@@ -115,35 +119,35 @@ class EditContentService:
         pkg = DocxPackage(request.document_path, writable=False)
         body = pkg.body
         heading_styles = bookmarks.get_heading_style_map(pkg)
-
+        
         markers: list[ContentMarker] = []
-
+        
         # Find the section bookmark element
         section_bm = bookmarks.find_bookmark_start(body, request.section_bookmark)
         if section_bm is None:
             return GetContentMarkersResult(markers=[])
-
+        
         # Find the section paragraph
         section_para = bookmarks.find_bookmark_paragraph(body, request.section_bookmark)
         if section_para is None:
             return GetContentMarkersResult(markers=[])
-
+        
         # Find the end of this section (next heading or end of body)
         next_heading = bookmarks.find_next_heading(body, section_para, heading_styles)
-
+        
         # Find all Content_Start bookmarks within this section
         for bookmark_start in body.findall(".//w:bookmarkStart", namespaces=NSMAP):
             bookmark_name = bookmark_start.get(f"{{{NSMAP['w']}}}name")
             if bookmark_name and bookmark_name.startswith("Content_Start_"):
                 logical_id = bookmark_name.replace("Content_Start_", "")
-
+                
                 # Check if this bookmark is within the current section using bookmark positions
                 # instead of paragraph positions
                 if self._is_bookmark_in_section(body, bookmark_start, section_bm, next_heading):
                     preview = self._get_content_preview(body, logical_id)
                     if preview:  # Only add if there's actual content
                         markers.append(ContentMarker(logical_id=logical_id, preview=preview))
-
+        
         return GetContentMarkersResult(markers=markers)
 
     def get_content_text(self, request: GetContentTextRequest) -> GetContentTextResult:
@@ -174,7 +178,7 @@ class EditContentService:
         else:
             output_path = request.document_path
             created_copy = False
-
+        
         with DocxPackage(request.document_path).edit_copy(destination=output_path if created_copy else None) as pkg:
             body = pkg.body
 
@@ -190,13 +194,18 @@ class EditContentService:
             for elem in elements_to_remove:
                 if elem.getparent() is not None:
                     elem.getparent().remove(elem)
-
+            
             # Convert new HTML to paragraphs
             new_paras = _html_to_paragraphs(request.new_html_content, None)
-
+            
             # Insert new paragraphs immediately before the end marker.
             bookmarks.insert_elements_before(end_boundary, new_paras)
-
+        
+        # Update TOC via COM automation if requested
+        if request.update_toc:
+            from app.services.word.section import update_toc_via_com
+            update_toc_via_com(output_path)
+        
         return ReplaceContentTextResult(output_path=output_path, created_copy=created_copy)
 
     def _is_bookmark_in_section(self, body: etree._Element, content_bm: etree._Element, section_bm: etree._Element, next_heading: etree._Element | None) -> bool:
@@ -210,13 +219,13 @@ class EditContentService:
         content_index = body.index(content_child)
         if content_index <= section_index:
             return False
-
+        
         # If there's a next heading, check if content comes before it
         if next_heading is not None:
             next_child = self._body_child_for_element(body, next_heading)
             if next_child is not None and content_index >= body.index(next_child):
                 return False
-
+        
         return True
 
     def _find_section_for_content(self, body: etree._Element, bookmark_start: etree._Element, heading_styles: dict) -> tuple[str, str, str]:
@@ -224,21 +233,21 @@ class EditContentService:
         bookmark_para = bookmarks.find_bookmark_paragraph_by_element(body, bookmark_start)
         if bookmark_para is None:
             return "", "", ""
-
+        
         # Find the heading paragraph before this content
         heading_para = bookmarks.find_previous_heading(body, bookmark_para, heading_styles)
         if heading_para is None:
             return "", "", ""
-
+        
         # Get the bookmark for this heading
         heading_bookmark = bookmarks.get_bookmark_for_paragraph(body, heading_para)
         if heading_bookmark is None:
             return "", "", ""
-
+        
         # Get section number and title
         section_number = bookmarks.get_section_number_from_bookmark(body, heading_bookmark, heading_styles)
         section_title = bookmarks.get_heading_text(heading_para)
-
+        
         return heading_bookmark, section_number, section_title
 
     def _get_content_preview(self, body: etree._Element, logical_id: str) -> str:
@@ -246,7 +255,7 @@ class EditContentService:
         content_paras = self._get_content_elements(body, logical_id)
         if not content_paras:
             return ""
-
+        
         # Extract text from first paragraph
         text = ""
         for para in content_paras[:2]:  # Check first 2 paragraphs
@@ -254,7 +263,7 @@ class EditContentService:
             text += para_text.strip() + " "
             if len(text) >= 50:
                 break
-
+        
         preview = text.strip()[:50]
         return preview
 
@@ -306,7 +315,7 @@ class EditContentService:
     def _paragraphs_to_html(self, paragraphs: list[etree._Element]) -> str:
         """Convert Word paragraphs back to HTML."""
         html_parts = []
-
+        
         for para in paragraphs:
             # Extract text and formatting
             text = ""
@@ -322,8 +331,8 @@ class EditContentService:
                         if rpr.find(w_tag("i"), namespaces=NSMAP) is not None:
                             run_text = f"<i>{run_text}</i>"
                     text += run_text
-
+            
             if text.strip():
                 html_parts.append(f"<p>{text}</p>")
-
+        
         return "".join(html_parts)

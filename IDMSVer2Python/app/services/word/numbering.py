@@ -117,7 +117,15 @@ def remap_numbering_in_elements(
             old_num_id = num_id_el.get(w_tag("val"), "")
             fmt = _get_num_format(source_numbering, old_num_id) if source_numbering is not None else None
 
-            if fmt == "bullet" and dest_lists["bullet"] is not None:
+            # Check if this is a heading paragraph (has pStyle with Heading)
+            style = ppr.find("w:pStyle", NSMAP)
+            is_heading = style is not None and style.get(w_tag("val"), "").lower().startswith("heading")
+
+            if is_heading:
+                # For headings, strip paragraph-level numbering entirely
+                # Let Word's heading styles control the numbering format
+                ppr.remove(num_pr)
+            elif fmt == "bullet" and dest_lists["bullet"] is not None:
                 num_id_el.set(w_tag("val"), str(dest_lists["bullet"]))
             elif fmt in ("decimal", "lowerLetter", "upperLetter", "lowerRoman", "upperRoman"):
                 if dest_lists["decimal"] is not None:
@@ -125,7 +133,7 @@ def remap_numbering_in_elements(
                 else:
                     ppr.remove(num_pr)
             else:
-                # Unknown or heading numbering — strip paragraph-level numbering
+                # Unknown numbering — strip paragraph-level numbering
                 # so destination styles control appearance
                 ppr.remove(num_pr)
 

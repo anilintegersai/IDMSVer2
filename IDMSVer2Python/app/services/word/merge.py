@@ -8,14 +8,117 @@ The merge preserves destination document formatting:
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from dataclasses import dataclass
 
 from app.config import Settings
 from app.core.exceptions import BookmarkNotFoundError, DocumentProcessingError
-from app.services.word import bookmarks, metadata, numbering, style_reconcile
+from app.core.namespaces import w_tag
+from app.services.word import bookmarks, metadata, numbering, style_reconcile, toc
 from app.services.word.document_package import DOCUMENT_XML, NUMBERING_XML, DocxPackage
+
+logger = logging.getLogger(__name__)
+
+
+def _renumber_inserted_headings_by_parent(
+    body: etree._Element,
+    heading_styles: dict[str, int] | None,
+    anchor_para: etree._Element,
+) -> None:
+    """Renumber inserted headings based on the parent section number.
+    
+    When content is inserted between sections, the parent section's number
+    becomes the prefix for all inserted content. For example:
+    - Parent: 3 (level 1)
+    - Inserted: 4.5, 4.5.1, 4.5.2 (from source, levels 1, 2, 2)
+    - Result: 3.1, 3.1.1, 3.1.2 (parent number + relative structure)
+    
+    The levels of inserted content are preserved, only the numbers change.
+    """
+    if not bookmarks.document_has_numbered_headings(body, heading_styles):
+        return
+    
+    parent = anchor_para.getparent()
+    if parent is None:
+        return
+    
+    insertion_index = parent.index(anchor_para)
+    
+    # Find the parent section number (the section immediately before the insertion point)
+    parent_section_number = None
+    parent_level = 1
+    
+    # Walk backwards from the insertion point to find the parent heading
+    for para in reversed(list(parent[:insertion_index])):
+        level = bookmarks._heading_level(para, heading_styles)
+        if level is not None:
+            text = bookmarks.paragraph_text(para).strip()
+            # Extract the section number from the heading text
+            import re
+            match = re.match(r"^(\d+(?:\.\d+)*)", text)
+            if match:
+                parent_section_number = match.group(1)
+                parent_level = level
+                break
+    
+    if parent_section_number is None:
+        # No parent section found, can't renumber
+        return
+    
+    # Find the next sibling heading at the same level as the parent
+    # This marks the end of the inserted content
+    next_sibling_index = None
+    for i in range(insertion_index + 1, len(parent)):
+        para = parent[i]
+        level = bookmarks._heading_level(para, heading_styles)
+        if level is not None and level == parent_level:
+            next_sibling_index = i
+            break
+    
+    # Renumber headings between insertion point and next sibling
+    # Use parent_section_number as the base prefix
+    parent_counters = [int(n) for n in parent_section_number.split(".")]
+    
+    # Track the minimum level in the inserted content
+    min_inserted_level = None
+    for i in range(insertion_index, next_sibling_index if next_sibling_index is not None else len(parent)):
+        para = parent[i]
+        level = bookmarks._heading_level(para, heading_styles)
+        if level is not None:
+            if min_inserted_level is None or level < min_inserted_level:
+                min_inserted_level = level
+    
+    if min_inserted_level is None:
+        return
+    
+    # Calculate the level offset from parent to first inserted heading
+    level_offset = min_inserted_level - parent_level
+    
+    # Renumber each heading
+    counters = parent_counters.copy()
+    for i in range(insertion_index, next_sibling_index if next_sibling_index is not None else len(parent)):
+        para = parent[i]
+        level = bookmarks._heading_level(para, heading_styles)
+        if level is None:
+            continue
+        
+        # Calculate the relative level (1-based from parent level)
+        relative_level = level - parent_level + 1
+        
+        # Extend counters if needed
+        while len(counters) < relative_level:
+            counters.append(1)
+        
+        # Increment the counter at this relative level
+        if relative_level <= len(counters):
+            counters[relative_level - 1] += 1
+            # Reset deeper levels
+            del counters[relative_level:]
+        
+        current_number = ".".join(str(n) for n in counters)
+        bookmarks._update_heading_number(para, current_number)
 
 
 @dataclass
@@ -26,6 +129,7 @@ class MergeSectionRequest:
     source_start_bookmark: str
     source_stop_bookmark: str
     insert_before_bookmark: str
+    update_toc: bool = False
 
 
 @dataclass
@@ -151,8 +255,14 @@ class MergeService:
             request.master_template_path,
         )
 
+        toc.update_toc(dest)  # mark TOC dirty + update-fields-on-open so the new section shows in the TOC
         dest.set_xml(DOCUMENT_XML, dest.document)
         dest.save()
+
+        # Update TOC via COM automation if requested
+        if request.update_toc:
+            from app.services.word.section import update_toc_via_com
+            update_toc_via_com(request.output_path)
 
         embedded_count = sum(1 for el in copied if el.tag.endswith("}tbl"))
 
@@ -230,7 +340,9 @@ class MergeService:
         style_reconcile.reconcile_content_styles(
             copied, source_pkg, dest, skip_ids=set(source_heading_styles)
         )
-        numbering.remap_heading_styles(copied, dest_level, source_heading_styles, dest_heading_styles)
+        # Remap heading styles to make inserted content children of the parent section
+        # Use dest_level + 1 so the first heading becomes a child of the parent
+        numbering.remap_heading_styles(copied, dest_level + 1, source_heading_styles, dest_heading_styles)
         numbering.strip_foreign_numbering_from_non_lists(copied)
         dest.set_xml(NUMBERING_XML, dest_numbering)
 
@@ -256,6 +368,10 @@ class MergeService:
         else:
             bookmarks.append_elements_before_sectpr(dest_body, to_insert)
 
+        # Renumber the inserted headings based on the parent section
+        if anchor_para is not None:
+            _renumber_inserted_headings_by_parent(dest_body, dest_heading_styles, anchor_para)
+
         metadata.add_merge_metadata(
             dest,
             logical_id,
@@ -265,6 +381,7 @@ class MergeService:
             request.master_template_path,
         )
 
+        toc.update_toc(dest)  # mark TOC dirty + update-fields-on-open so the new section shows in the TOC
         dest.set_xml(DOCUMENT_XML, dest.document)
         dest.save()
 
